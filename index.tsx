@@ -18,7 +18,7 @@ import {
 // Estas chaves liberam o acesso ao terminal. Se alteradas aqui e feito deploy, 
 // o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
-  'UB8OU-LJ58U-5IDEV-NYBUD-FNBYB', //-- RD STREET
+  'UB8OU-LJ58U-5IDEV-NYBUD-FNBY', //-- RD STREET
 ];
 
 // --- UTILITÁRIOS DE FORMATAÇÃO ---
