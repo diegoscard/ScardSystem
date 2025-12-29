@@ -19,6 +19,7 @@ import {
 // o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
   '9H68Y-3EZLI-9EQES-8PEMC-J9H17', //-- RD STREET
+  'master',
 ];
 
 // --- UTILITÁRIOS DE FORMATAÇÃO ---
@@ -2133,6 +2134,7 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
 
   const totalReceivedForBadges = stats.totals.cash + stats.totals.pix + stats.totals.card + stats.totals.voucher + stats.totals.voucherVip;
   const totalStock = products.reduce((acc: number, p: any) => acc + p.stock, 0);
+  const totalStockCost = products.reduce((acc: number, p: any) => acc + (p.cost * p.stock), 0);
   
   return (
     <div className="space-y-8 animate-in fade-in h-full flex flex-col pb-10">
@@ -2154,7 +2156,7 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <CardStat icon={<TrendingUp size={24}/>} label="Faturamento" val={`R$ ${stats.totals.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} color="green" />
         <CardStat icon={<Wallet size={24}/>} label="Caixa Atual" val={`R$ ${cashSession?.currentBalance?.toFixed(2) || '0.00'}`} color="indigo" />
-        <CardStat icon={<Box size={24}/>} label="Total Estoque" val={`${totalStock} peças`} color="blue" />
+        <CardStat icon={<Box size={24}/>} label="Total Estoque" val={`${totalStock} peças`} subVal={`Custo Total R$ ${formatCurrency(totalStockCost)}`} color="blue" />
         <CardStat icon={<ShoppingCart size={24}/>} label="Volume Vendas" val={stats.totals.count} color="amber" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2225,10 +2227,14 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
   );
 };
 
-const CardStat = ({ icon, label, val, color }: any) => (
+const CardStat = ({ icon, label, val, color, subVal }: any) => (
   <div className="bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 flex items-center gap-5 hover:shadow-xl hover:-translate-y-1 transition-all group">
     <div className={`p-4 rounded-2xl bg-${color}-50 text-${color}-600 group-hover:scale-110 transition-transform`}>{icon}</div>
-    <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">{label}</p><p className="text-2xl font-black text-slate-900 font-mono italic tracking-tighter">{val}</p></div>
+    <div>
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">{label}</p>
+      <p className="text-2xl font-black text-slate-900 font-mono italic tracking-tighter leading-tight">{val}</p>
+      {subVal && <p className="text-[9px] font-black text-red-500 uppercase mt-1 tracking-tight">{subVal}</p>}
+    </div>
   </div>
 );
 
