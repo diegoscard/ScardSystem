@@ -1,0 +1,1 @@
+// Os tipos foram movidos para o index.tsx para manter o código centralizado e de fácil acesso.

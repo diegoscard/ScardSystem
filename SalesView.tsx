@@ -1,0 +1,1 @@
+// Este arquivo foi consolidado no index.tsx para facilitar a edição direta do sistema pelo código.
