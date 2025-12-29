@@ -616,7 +616,7 @@ const App = () => {
           )}
           <button type="button" onClick={() => { setIsUnlocked(false); setUser(null); }} className="flex items-center space-x-3 text-slate-500 hover:text-red-400 transition-all w-full px-4 py-3 rounded-xl hover:bg-red-500/5 group">
             <LogOut size={18} />
-            <span className="font-black uppercase text-[9px] tracking-widest">Logout Geral</span>
+            <span className="font-black uppercase text-[9px] tracking-widest">Sair</span>
           </button>
         </div>
       </aside>
@@ -1805,7 +1805,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
              const log: CashLog = { id: Math.random().toString(36).substr(2, 9), type: modalFluxo, amount: fluxoVal, description: fluxoDesc || (modalFluxo === 'retirada' ? 'Sangria manual' : 'Entrada manual'), time: new Date().toISOString(), user: user.name };
              setCashSession((prev: CashSession) => ({ ...prev, currentBalance: prev.currentBalance + amt, logs: [log, ...prev.logs] }));
              setModalFluxo(null); setFluxoVal(0); setFluxoDesc('');
-          }} className="bg-white p-10 rounded-[2.5rem] w-full max-md shadow-2xl space-y-8 animate-in fade-in zoom-in-95">
+          }} className="bg-white p-10 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-8 animate-in fade-in zoom-in-95">
              <div className="flex justify-between items-center border-b border-slate-100 pb-4">
                <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter">
                 {modalFluxo === 'retirada' ? 'Sangria de Caixa' : 'Entrada de Caixa'}
