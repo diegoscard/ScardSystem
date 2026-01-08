@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -25,10 +24,10 @@ const VALID_ACCESS_KEYS = [
 // --- UTILITÁRIOS DE SEGURANÇA DE HARDWARE ---
 
 const getDeviceFingerprint = () => {
-  const { userAgent, language, hardwareConcurrency } = navigator;
-  const { width, height, colorDepth } = window.screen;
-  // Cria uma assinatura única baseada nas características do hardware e navegador
-  return `${userAgent}|${language}|${hardwareConcurrency}|${width}x${height}|${colorDepth}`;
+  const { userAgent, language, hardwareConcurrency, platform } = navigator;
+  const { width, height, colorDepth, availWidth, availHeight } = window.screen;
+  // Cria uma assinatura única baseada nas características do hardware e navegador para evitar colisões
+  return `${userAgent}|${language}|${hardwareConcurrency}|${platform}|${width}x${height}|${availWidth}x${availHeight}|${colorDepth}`;
 };
 
 const generateHWID = (str: string) => {
@@ -38,7 +37,8 @@ const generateHWID = (str: string) => {
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash; // Convert to 32bit integer
   }
-  return 'SCARD-' + Math.abs(hash).toString(36).toUpperCase();
+  // Removido prefixo SCARD- conforme solicitação do usuário
+  return Math.abs(hash).toString(36).toUpperCase();
 };
 
 // --- UTILITÁRIOS DE FORMATAÇÃO ---
@@ -292,14 +292,14 @@ const App = () => {
     setIsValidating(true);
     const trimmedKey = accessKeyInput.trim();
 
-    // Simulação de delay de rede para validação "Cloud"
+    // Simulação de delay para validação e persistência do HWID
     setTimeout(() => {
       if (VALID_ACCESS_KEYS.includes(trimmedKey)) {
         // Lógica de Trava de Hardware (Cross-Machine Prevention)
         const registeredHwid = keyRegistrations[trimmedKey];
         
         if (registeredHwid && registeredHwid !== deviceHwid) {
-          alert('ERRO DE SEGURANÇA: Esta chave já está vinculada a outro terminal/dispositivo. Chaves de licença SCARDPRO são intransferíveis.');
+          alert('ERRO DE SEGURANÇA: Esta licença/chave já está vinculada a outro dispositivo. Chaves de acesso SCARDPRO são de uso exclusivo por terminal único (HWID Lock).');
           setIsValidating(false);
           setAccessKeyInput('');
           return;
@@ -315,7 +315,7 @@ const App = () => {
         }
         setIsUnlocked(true);
       } else {
-        alert('Chave de acesso inválida ou expirada. Entre em contato com o administrador.');
+        alert('Chave de acesso inválida ou expirada. Entre em contato com o suporte SCARD.');
         setAccessKeyInput('');
       }
       setIsValidating(false);
@@ -426,7 +426,7 @@ const App = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!window.confirm("ATENÇÃO: Restaurar o backup irá sobrescrever TODOS os dados atuais (estoque, vendas, usuários). Deseja continuar?")) {
+    if (!window.confirm("ATENÇÃO: Restaurar o backup irá sobrescrever TODOS os dados atuais (estoque, vendas, usuários e licenças). Deseja continuar?")) {
       return;
     }
 
@@ -2523,7 +2523,7 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
 
       {reprintSale && (
         <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-6 z-[150] backdrop-blur-sm animate-in fade-in no-print-overlay">
-          <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
+          <div className="bg-white p-8 rounded-[2.5rem] w-full max-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
              <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full mx-auto flex items-center justify-center border border-indigo-100">
                     <Printer size={32} strokeWidth={3} />
