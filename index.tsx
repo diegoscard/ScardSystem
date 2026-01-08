@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -10,16 +11,35 @@ import {
   History, Clock, UserCheck, RotateCcw, Award, Zap, Calculator, Trophy, Star, Medal,
   ChevronLeft, ChevronRight, ListOrdered, Download, Upload, Save, FileWarning,
   Megaphone, CalendarDays, CheckCircle2, TicketPercent, Gift, ShieldCheck as ShieldIcon,
-  Printer, Check, Key, Shield
+  Printer, Check, Key, Shield, Monitor
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DE SEGURANÇA (CHAVES DE ACESSO) ---
 // Estas chaves liberam o acesso ao terminal. Se alteradas aqui e feito deploy, 
 // o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
-  'I54K4-Z90KR-8TYEF-BZJMN-0GADZ', //-- RD STREET
-  'PXD9A-RQ286-B6UN8-ATJCR-CHCO8', //-- DIEGO SCARD
+  'A6OAQ-HH78Z-TMMWR-9P8V6-CG4WI', //-- RD STREET
+  'master',
 ];
+
+// --- UTILITÁRIOS DE SEGURANÇA DE HARDWARE ---
+
+const getDeviceFingerprint = () => {
+  const { userAgent, language, hardwareConcurrency } = navigator;
+  const { width, height, colorDepth } = window.screen;
+  // Cria uma assinatura única baseada nas características do hardware e navegador
+  return `${userAgent}|${language}|${hardwareConcurrency}|${width}x${height}|${colorDepth}`;
+};
+
+const generateHWID = (str: string) => {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return 'SCARD-' + Math.abs(hash).toString(36).toUpperCase();
+};
 
 // --- UTILITÁRIOS DE FORMATAÇÃO ---
 
@@ -209,6 +229,7 @@ const App = () => {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [accessKeyInput, setAccessKeyInput] = useState('');
   const [rememberKey, setRememberKey] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
   
   const [user, setUser] = useState<User | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -244,32 +265,61 @@ const App = () => {
   const [cashHistory, setCashHistory] = usePersistedState<CashHistoryEntry[]>('db_cash_history', []);
   const [settings, setSettings] = usePersistedState<AppSettings>('db_settings', DEFAULT_SETTINGS);
   const [exchangeCredit, setExchangeCredit] = usePersistedState<number>('db_exchange_credit', 0);
+  const [keyRegistrations, setKeyRegistrations] = usePersistedState<Record<string, string>>('db_key_registrations', {});
   const [currentView, setCurrentView] = useState('dashboard');
   
   const [openingBalanceInput, setOpeningBalanceInput] = useState(0);
+
+  const deviceHwid = useMemo(() => generateHWID(getDeviceFingerprint()), []);
 
   // Efeito para verificar chave memorizada ao iniciar
   useEffect(() => {
     const savedKey = localStorage.getItem('scard_saved_access_key');
     if (savedKey && VALID_ACCESS_KEYS.includes(savedKey)) {
+      // Verifica se a chave salva pertence a este HWID
+      if (keyRegistrations[savedKey] && keyRegistrations[savedKey] !== deviceHwid) {
+        localStorage.removeItem('scard_saved_access_key');
+        return;
+      }
       setIsUnlocked(true);
     }
-  }, []);
+  }, [keyRegistrations, deviceHwid]);
 
   const handleVerifyAccessKey = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rememberKey) return; // Só permite se o checkbox de memorizar/termos estiver ativo
+    if (!rememberKey) return; 
 
+    setIsValidating(true);
     const trimmedKey = accessKeyInput.trim();
-    if (VALID_ACCESS_KEYS.includes(trimmedKey)) {
-      if (rememberKey) {
-        localStorage.setItem('scard_saved_access_key', trimmedKey);
+
+    // Simulação de delay de rede para validação "Cloud"
+    setTimeout(() => {
+      if (VALID_ACCESS_KEYS.includes(trimmedKey)) {
+        // Lógica de Trava de Hardware (Cross-Machine Prevention)
+        const registeredHwid = keyRegistrations[trimmedKey];
+        
+        if (registeredHwid && registeredHwid !== deviceHwid) {
+          alert('ERRO DE SEGURANÇA: Esta chave já está vinculada a outro terminal/dispositivo. Chaves de licença SCARDPRO são intransferíveis.');
+          setIsValidating(false);
+          setAccessKeyInput('');
+          return;
+        }
+
+        // Registrar chave para este HWID se for o primeiro uso
+        if (!registeredHwid) {
+          setKeyRegistrations(prev => ({ ...prev, [trimmedKey]: deviceHwid }));
+        }
+
+        if (rememberKey) {
+          localStorage.setItem('scard_saved_access_key', trimmedKey);
+        }
+        setIsUnlocked(true);
+      } else {
+        alert('Chave de acesso inválida ou expirada. Entre em contato com o administrador.');
+        setAccessKeyInput('');
       }
-      setIsUnlocked(true);
-    } else {
-      alert('Chave de acesso inválida ou expirada. Entre em contato com o administrador.');
-      setAccessKeyInput('');
-    }
+      setIsValidating(false);
+    }, 1200);
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -334,7 +384,7 @@ const App = () => {
     const dataKeys = [
       'db_users', 'db_products', 'db_suppliers', 'db_categories', 
       'db_movements', 'db_sales', 'db_cash_session', 'db_cash_history', 
-      'db_settings', 'db_exchange_credit', 'db_campaigns'
+      'db_settings', 'db_exchange_credit', 'db_campaigns', 'db_key_registrations'
     ];
     
     const backupData: Record<string, any> = {};
@@ -454,7 +504,7 @@ const App = () => {
         
         <div className="bg-slate-900/40 backdrop-blur-3xl p-10 rounded-[3rem] shadow-[0_0_50px_rgba(0,0,0,0.5)] w-full max-w-sm border border-slate-800/50 relative z-10 animate-in fade-in zoom-in-95 duration-500 text-center">
           <div className="mb-10 inline-flex p-5 rounded-3xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
-            <Shield size={48} strokeWidth={1.5} />
+            {isValidating ? <RefreshCw size={48} className="animate-spin text-indigo-500" /> : <Shield size={48} strokeWidth={1.5} />}
           </div>
           
           <div className="mb-10">
@@ -470,6 +520,7 @@ const App = () => {
                 <input 
                   type="password" 
                   autoFocus 
+                  disabled={isValidating}
                   placeholder="••••••••••••" 
                   className="w-full rounded-2xl border-2 border-slate-800 bg-slate-950/50 px-12 py-5 text-indigo-400 focus:border-indigo-500 outline-none transition-all font-mono font-bold text-center tracking-widest placeholder:text-slate-800"
                   value={accessKeyInput}
@@ -483,17 +534,25 @@ const App = () => {
                 <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all ${rememberKey ? 'bg-indigo-600 border-indigo-600' : 'border-slate-700 bg-transparent'}`}>
                     {rememberKey && <Check size={14} className="text-white" />}
                 </div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider text-left">Memorizar chave de acesso</span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider text-left">Concordo com os Termos de Uso e Licença de Terminal Único</span>
             </div>
             
             <button 
                 type="submit" 
-                disabled={!rememberKey}
-                className={`w-full rounded-2xl py-5 text-white font-black shadow-[0_10px_30px_rgba(79,70,229,0.3)] transition-all active:scale-95 uppercase text-xs tracking-[0.2em] ${!rememberKey ? 'bg-slate-800 text-slate-600 cursor-not-allowed shadow-none' : 'bg-indigo-600 hover:bg-indigo-50'}`}
+                disabled={!rememberKey || isValidating}
+                className={`w-full rounded-2xl py-5 text-white font-black shadow-[0_10px_30px_rgba(79,70,229,0.3)] transition-all active:scale-95 uppercase text-xs tracking-[0.2em] ${(!rememberKey || isValidating) ? 'bg-slate-800 text-slate-600 cursor-not-allowed shadow-none' : 'bg-indigo-600 hover:bg-indigo-500'}`}
             >
-              Validar Acesso
+              {isValidating ? 'Validando HWID...' : 'Validar Acesso'}
             </button>
           </form>
+
+          <div className="mt-8 pt-8 border-t border-slate-800/50 flex flex-col items-center gap-2">
+            <div className="flex items-center gap-2 text-slate-500 opacity-60">
+              <Monitor size={12} />
+              <span className="text-[8px] font-black uppercase tracking-widest">Identificador do Terminal</span>
+            </div>
+            <code className="bg-slate-950/80 px-3 py-1.5 rounded-lg text-[9px] font-mono font-black text-indigo-500/80 border border-slate-800/50">{deviceHwid}</code>
+          </div>
         </div>
       </div>
     );
