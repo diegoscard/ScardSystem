@@ -17,7 +17,8 @@ import {
 // Estas chaves liberam o acesso ao terminal. Se alteradas aqui e feito deploy, 
 // o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
-  'A6OAQ-HH78Z-TMMWR-9P8V6-CG4WI', //-- RD STREET
+  'I54K4-Z90KR-8TYEF-BZJMN-0GADZ', //-- RD STREET
+  'PXD9A-RQ286-B6UN8-ATJCR-CHCO8', //-- DIEGO SCARD
   'master',
 ];
 
