@@ -18,7 +18,7 @@ import {
 // o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
   'A6OAQ-HH78Z-TMMWR-9P8V6-CG4WI', //-- RD STREET
-  'master',
+  'Master',
 ];
 
 // --- UTILITÁRIOS DE SEGURANÇA DE HARDWARE ---
@@ -37,7 +37,6 @@ const generateHWID = (str: string) => {
     hash = ((hash << 5) - hash) + char;
     hash = hash & hash; // Convert to 32bit integer
   }
-  // Removido prefixo SCARD- conforme solicitação do usuário
   return Math.abs(hash).toString(36).toUpperCase();
 };
 
