@@ -119,7 +119,7 @@ interface SaleItem {
   manualDiscountValue: number; // Campo de desconto manual por produto
   isExchanged?: boolean; 
   campaignName?: string; 
-  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher';
+  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher' | 'single_price';
 }
 
 interface PaymentRecord {
@@ -203,8 +203,9 @@ interface Campaign {
   id: number;
   name: string;
   description: string;
-  type: 'percentage' | 'buy_x_get_y' | 'voucher';
+  type: 'percentage' | 'buy_x_get_y' | 'voucher' | 'single_price';
   discountPercent: number;
+  fixedPrice?: number;
   pagueX?: number; // Qtd Paga (ex: 2)
   leveY?: number;  // Qtd Levada (ex: 3)
   voucherCode?: string;
@@ -1126,8 +1127,13 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
   const [modal, setModal] = useState(false);
   const [prodSearch, setProdSearch] = useState('');
   const [form, setForm] = useState<Partial<Campaign>>({
-    name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: []
+    name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: []
   });
+
+  const availableCategories = useMemo(() => {
+    const cats = new Set(products.map(p => p.category || 'Sem Categoria'));
+    return Array.from(cats).sort();
+  }, [products]);
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1142,7 +1148,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
     else setCampaigns((prev: Campaign[]) => [...prev, c]);
     
     setModal(false);
-    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] });
+    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] });
   };
 
   const filteredProds = products.filter(p => p.active && (p.name.toLowerCase().includes(prodSearch.toLowerCase()) || p.sku.toLowerCase().includes(prodSearch.toLowerCase())));
@@ -1156,6 +1162,19 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
     }
   };
 
+  const toggleCategory = (cat: string) => {
+    const productsInCat = products.filter(p => (p.category || 'Sem Categoria') === cat).map(p => p.id);
+    const currentIds = form.productIds || [];
+    const allSelected = productsInCat.length > 0 && productsInCat.every(id => currentIds.includes(id));
+    
+    if (allSelected) {
+      setForm({ ...form, productIds: currentIds.filter(id => !productsInCat.includes(id)) });
+    } else {
+      const newIds = Array.from(new Set([...currentIds, ...productsInCat]));
+      setForm({ ...form, productIds: newIds });
+    }
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0 animate-in fade-in">
       <div className="flex justify-between items-center shrink-0">
@@ -1163,7 +1182,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
           <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Campanhas</h2>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gestão de promoções e eventos</p>
         </div>
-        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
+        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
           <Plus size={16} /> Nova Campanha
         </button>
       </div>
@@ -1199,6 +1218,10 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                        <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-[10px] font-black border border-indigo-100 uppercase flex items-center gap-1.5 w-fit">
                           <TicketPercent size={12} /> PAGUE {c.pagueX} LEVE {c.leveY}
                        </span>
+                     ) : c.type === 'single_price' ? (
+                        <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-[10px] font-black border border-emerald-100 uppercase flex items-center gap-1.5 w-fit">
+                          <Tag size={12} /> R$ {formatCurrency(c.fixedPrice || 0)}
+                        </span>
                      ) : (
                         <div className="flex flex-col gap-1">
                             <span className="bg-amber-50 text-amber-600 px-3 py-1 rounded-full text-[10px] font-black border border-amber-100 uppercase flex items-center gap-1.5 w-fit">
@@ -1254,7 +1277,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
 
       {modal && (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in">
-          <form onSubmit={save} className="bg-white p-8 rounded-[2.5rem] w-full max-w-3xl shadow-2xl space-y-6 max-h-[90vh] overflow-hidden flex flex-col relative z-20">
+          <form onSubmit={save} className="bg-white p-8 rounded-[2.5rem] w-full max-w-4xl shadow-2xl space-y-6 max-h-[90vh] overflow-hidden flex flex-col relative z-20">
             <div className="flex justify-between items-center border-b pb-4 shrink-0">
                <h3 className="text-xl font-black text-slate-900 uppercase italic">
                   {form.id ? 'Ajustar' : 'Nova'} Campanha / Voucher
@@ -1263,7 +1286,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll pr-2 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <div className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Nome da Campanha</label>
@@ -1278,6 +1301,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                         <select className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold uppercase focus:border-indigo-500 outline-none" value={form.type} onChange={e => setForm({ ...form, type: e.target.value as any })}>
                            <option value="percentage">Desconto Percentual (%)</option>
                            <option value="buy_x_get_y">Pague X, Leve Y (Item Grátis)</option>
+                           <option value="single_price">Preço Único (R$ Fixo)</option>
                            <option value="voucher">Cupom de Desconto (Voucher)</option>
                         </select>
                     </div>
@@ -1295,6 +1319,23 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                               onFocus={() => { if(form.discountPercent === 0) setForm(prev => ({...prev, discountPercent: '' as any})); }} 
                               onBlur={() => { if(form.discountPercent as any === '') setForm(prev => ({...prev, discountPercent: 0})); }}
                               onChange={e => setForm(prev => ({ ...prev, discountPercent: e.target.value === '' ? '' as any : Number(e.target.value) }))} 
+                              required 
+                            />
+                          </div>
+                       </div>
+                    )}
+
+                    {form.type === 'single_price' && (
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Preço Fixo da Campanha (R$)</label>
+                          <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-300">R$</span>
+                            <input 
+                              type="text" 
+                              className="w-full border-2 rounded-xl pl-12 pr-4 py-2.5 text-sm font-black text-emerald-600 focus:border-emerald-300 outline-none" 
+                              value={formatCurrency(form.fixedPrice || 0)} 
+                              onFocus={(e) => e.target.select()}
+                              onChange={e => setForm(prev => ({ ...prev, fixedPrice: parseCurrency(e.target.value) }))} 
                               required 
                             />
                           </div>
@@ -1319,7 +1360,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                               type="number" 
                               className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-green-600 focus:border-green-300 outline-none" 
                               value={form.leveY} 
-                              onChange={e => setForm(prev => ({ ...prev, laveY: Number(e.target.value) }))} 
+                              onChange={e => setForm(prev => ({ ...prev, leveY: Number(e.target.value) }))} 
                               required 
                             />
                           </div>
@@ -1373,17 +1414,35 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                   </div>
 
                   <div className="space-y-4 flex flex-col min-h-0">
-                    <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Selecionar Produtos Participantes</label>
+                    <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Participantes (Produtos ou Categorias)</label>
+                    <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                      {availableCategories.map(cat => {
+                        const productsInCat = products.filter(p => (p.category || 'Sem Categoria') === cat).map(p => p.id);
+                        const currentIds = form.productIds || [];
+                        const allInCatSelected = productsInCat.length > 0 && productsInCat.every(id => currentIds.includes(id));
+                        return (
+                          <button 
+                            key={cat} 
+                            type="button"
+                            onClick={() => toggleCategory(cat)}
+                            className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase transition-all border ${allInCatSelected ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}
+                          >
+                            {cat}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                     <div className="relative">
                       <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input type="text" placeholder="Buscar produto por nome ou SKU..." className="w-full border-2 rounded-xl pl-9 pr-4 py-2 text-xs font-bold bg-slate-50 outline-none focus:border-indigo-500" value={prodSearch} onChange={e => setProdSearch(e.target.value)} />
+                      <input type="text" placeholder="Filtrar produtos por nome ou SKU..." className="w-full border-2 rounded-xl pl-9 pr-4 py-2 text-xs font-bold bg-slate-50 outline-none focus:border-indigo-500" value={prodSearch} onChange={e => setProdSearch(e.target.value)} />
                     </div>
-                    <div className="flex-1 border-2 rounded-2xl overflow-y-auto custom-scroll bg-slate-50 p-2 space-y-1 max-h-[300px]">
+                    <div className="flex-1 border-2 rounded-2xl overflow-y-auto custom-scroll bg-slate-50 p-2 space-y-1 max-h-[250px]">
                         {filteredProds.map(p => (
                           <div key={p.id} onClick={() => toggleProduct(p.id)} className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all ${form.productIds?.includes(p.id) ? 'bg-indigo-600 text-white shadow-md' : 'bg-white hover:bg-indigo-50 text-slate-700'}`}>
                              <div className="flex flex-col min-w-0">
                                 <span className="text-[10px] font-black uppercase truncate">{p.name}</span>
-                                <span className={`text-[8px] font-mono ${form.productIds?.includes(p.id) ? 'text-indigo-200' : 'text-slate-400'}`}>SKU: {p.sku}</span>
+                                <span className={`text-[8px] font-mono ${form.productIds?.includes(p.id) ? 'text-indigo-200' : 'text-slate-400'}`}>SKU: {p.sku} | CAT: {p.category || 'Sem Cat.'}</span>
                              </div>
                              {form.productIds?.includes(p.id) ? <CheckCircle2 size={14} /> : <Plus size={14} className="text-slate-300" />}
                           </div>
@@ -1511,9 +1570,18 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
     newCart = newCart.map(item => {
       if (item.campaignType) return item; 
       const camp = getQualifyingCampaign(item.productId);
-      if (camp && camp.type === 'percentage') {
-        const disc = (item.price * item.quantity) * (camp.discountPercent / 100);
-        return { ...item, discountValue: disc, campaignName: camp.name, campaignType: 'percentage' };
+      if (camp) {
+        if (camp.type === 'single_price') {
+           const fixed = camp.fixedPrice || item.price;
+           const diff = Math.max(0, item.price - fixed);
+           if (diff > 0) {
+              return { ...item, discountValue: diff * item.quantity, campaignName: camp.name, campaignType: 'single_price' };
+           }
+        }
+        if (camp.type === 'percentage') {
+          const disc = (item.price * item.quantity) * (camp.discountPercent / 100);
+          return { ...item, discountValue: disc, campaignName: camp.name, campaignType: 'percentage' };
+        }
       }
       return item;
     });
@@ -1909,8 +1977,8 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                             )}
                           </div>
                           {item.campaignName && (
-                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
-                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : item.campaignType === 'percentage' ? 'Promo' : 'Cupom'}: {item.campaignName}
+                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : item.campaignType === 'single_price' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : item.campaignType === 'percentage' ? 'Promo' : item.campaignType === 'single_price' ? 'Preço Fixo' : 'Cupom'}: {item.campaignName}
                             </span>
                           )}
                         </div>
