@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -10,7 +11,7 @@ import {
   History, Clock, UserCheck, RotateCcw, Award, Zap, Calculator, Trophy, Star, Medal,
   ChevronLeft, ChevronRight, ListOrdered, Download, Upload, Save, FileWarning,
   Megaphone, CalendarDays, CheckCircle2, TicketPercent, Gift, ShieldCheck as ShieldIcon,
-  Printer, Check, Key, Shield, Monitor
+  Printer, Check, Key, Shield, Monitor, UserPlus, HandCoins
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DE SEGURANÇA (CHAVES DE ACESSO) ---
@@ -128,6 +129,23 @@ interface PaymentRecord {
   installmentValue?: number;
   netAmount: number;
   voucherCode?: string;
+  f12ClientName?: string;
+  f12Description?: string;
+  f12DueDate?: string;
+}
+
+interface FiadoRecord {
+  id: string;
+  saleId: number;
+  clientName: string;
+  description: string;
+  totalAmount: number;
+  remainingAmount: number;
+  createdAt: string;
+  dueDate: string;
+  vendedor: string;
+  status: 'pending' | 'paid';
+  items: SaleItem[];
 }
 
 interface CashLog {
@@ -265,6 +283,7 @@ const App = () => {
   const [settings, setSettings] = usePersistedState<AppSettings>('db_settings', DEFAULT_SETTINGS);
   const [exchangeCredit, setExchangeCredit] = usePersistedState<number>('db_exchange_credit', 0);
   const [keyRegistrations, setKeyRegistrations] = usePersistedState<Record<string, string>>('db_key_registrations', {});
+  const [fiados, setFiados] = usePersistedState<FiadoRecord[]>('db_fiados', []);
   const [currentView, setCurrentView] = useState('dashboard');
   
   const [openingBalanceInput, setOpeningBalanceInput] = useState(0);
@@ -383,7 +402,7 @@ const App = () => {
     const dataKeys = [
       'db_users', 'db_products', 'db_suppliers', 'db_categories', 
       'db_movements', 'db_sales', 'db_cash_session', 'db_cash_history', 
-      'db_settings', 'db_exchange_credit', 'db_campaigns', 'db_key_registrations'
+      'db_settings', 'db_exchange_credit', 'db_campaigns', 'db_key_registrations', 'db_fiados'
     ];
     
     const backupData: Record<string, any> = {};
@@ -539,7 +558,7 @@ const App = () => {
             <button 
                 type="submit" 
                 disabled={!rememberKey || isValidating}
-                className={`w-full rounded-2xl py-5 text-white font-black shadow-[0_10px_30px_rgba(79,70,229,0.3)] transition-all active:scale-95 uppercase text-xs tracking-[0.2em] ${(!rememberKey || isValidating) ? 'bg-slate-800 text-slate-600 cursor-not-allowed shadow-none' : 'bg-indigo-600 hover:bg-indigo-500'}`}
+                className={`w-full rounded-2xl py-5 text-white font-black shadow-[0_10px_30px_rgba(79,70,229,0.3)] transition-all active:scale-95 uppercase text-xs tracking-[0.2em] ${(!rememberKey || isValidating) ? 'bg-slate-800 text-slate-600 cursor-not-allowed shadow-none' : 'bg-indigo-600 hover:bg-indigo-50'}`}
             >
               {isValidating ? 'Validando HWID...' : 'Validar Acesso'}
             </button>
@@ -621,6 +640,8 @@ const App = () => {
   const isCashOpen = cashSession && cashSession.isOpen;
 
   const hasPermission = (viewId: string) => {
+    // Permission system: Admin has all access. Certain views are always allowed for everyone.
+    // 'fiado' is removed from the "always true" list to satisfy the user request.
     if (isAdmin || viewId === 'sales' || viewId === 'reports' || viewId === 'product_search') return true; 
     return (settings.sellerPermissions || []).includes(viewId);
   };
@@ -644,14 +665,14 @@ const App = () => {
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scroll">
           <NavBtn active={currentView === 'sales'} onClick={() => setCurrentView('sales')} icon={<ShoppingCart size={18}/>} label="Caixa PDV" />
           <NavBtn active={currentView === 'product_search'} onClick={() => setCurrentView('product_search')} icon={<Search size={18}/>} label="Consultar" />
+          {hasPermission('fiado') && <NavBtn active={currentView === 'fiado'} onClick={() => setCurrentView('fiado')} icon={<HandCoins size={18}/>} label="Pendentes (F12)" />}
           <NavBtn active={currentView === 'reports'} onClick={() => setCurrentView('reports')} icon={<TrendingUp size={18}/>} label="Relatórios" />
           {hasPermission('stock') && <NavBtn active={currentView === 'stock'} onClick={() => setCurrentView('stock')} icon={<Package size={18}/>} label="Estoque" />}
           
-          {(isAdmin || hasPermission('suppliers') || hasPermission('dashboard') || hasPermission('campaigns')) && (
+          {(isAdmin || hasPermission('dashboard') || hasPermission('campaigns')) && (
             <div className="pt-6 mt-6 border-t border-slate-900 space-y-1">
                <p className="px-4 text-[9px] font-black text-slate-600 uppercase tracking-[0.3em] mb-4">Admin</p>
                {hasPermission('campaigns') && <NavBtn active={currentView === 'campaigns'} onClick={() => setCurrentView('campaigns')} icon={<Megaphone size={18}/>} label="Campanhas" />}
-               {hasPermission('suppliers') && <NavBtn active={currentView === 'suppliers'} onClick={() => setCurrentView('suppliers')} icon={<Truck size={18}/>} label="Fornecedores" />}
                {hasPermission('dashboard') && <NavBtn active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} icon={<LayoutDashboard size={18}/>} label="Dashboard" />}
                {isAdmin && <NavBtn active={currentView === 'team'} onClick={() => setCurrentView('team')} icon={<Users size={18}/>} label="Equipe" />}
                {isAdmin && <NavBtn active={currentView === 'settings'} onClick={() => setCurrentView('settings')} icon={<Settings size={18}/>} label="Ajustes" />}
@@ -736,11 +757,23 @@ const App = () => {
                 setExchangeCredit={setExchangeCredit}
                 campaigns={campaigns}
                 setCampaigns={setCampaigns}
+                fiados={fiados}
+                setFiados={setFiados}
               />
             )
           )}
           {currentView === 'product_search' && (
             <ProductSearchViewComponent products={products} categories={categories} />
+          )}
+          {currentView === 'fiado' && (
+             <FiadoManagementView 
+               user={user}
+               fiados={fiados} 
+               setFiados={setFiados} 
+               cashSession={cashSession} 
+               setCashSession={setCashSession} 
+               cashHistory={cashHistory}
+             />
           )}
           {currentView === 'stock' && (
             <StockManagementView
@@ -752,14 +785,11 @@ const App = () => {
               categories={categories}
             />
           )}
-          {currentView === 'suppliers' && (
-            <SuppliersViewComponent suppliers={suppliers} setSuppliers={setSuppliers} />
-          )}
           {currentView === 'campaigns' && (
             <CampaignsViewComponent campaigns={campaigns} setCampaigns={setCampaigns} products={products} />
           )}
           {currentView === 'dashboard' && (
-            <DashboardViewComponent products={products} sales={sales} cashSession={cashSession} />
+            <DashboardViewComponent products={products} sales={sales} cashSession={cashSession} fiados={fiados} cashHistory={cashHistory} />
           )}
           {currentView === 'reports' && (
             <ReportsViewComponent 
@@ -802,6 +832,200 @@ const NavBtn = ({ active, onClick, icon, label }: any) => (
     <span className="tracking-tight">{label}</span>
   </button>
 );
+
+// --- COMPONENTE GESTÃO DE PENDENTES (F12) ---
+
+const FiadoManagementView = ({ user, fiados, setFiados, cashSession, setCashSession, cashHistory }: any) => {
+  const [search, setSearch] = useState('');
+  const [receivingModal, setReceivingModal] = useState<FiadoRecord | null>(null);
+  const [receiveAmount, setReceiveAmount] = useState(0);
+  const [receiveMethod, setReceiveMethod] = useState('Dinheiro');
+
+  const pendingFiados = useMemo(() => {
+    return fiados.filter((f: FiadoRecord) => f.status === 'pending' && 
+      (f.clientName.toLowerCase().includes(search.toLowerCase()) || f.description.toLowerCase().includes(search.toLowerCase())));
+  }, [fiados, search]);
+
+  const handleReceive = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receivingModal) return;
+
+    if (receiveAmount <= 0 || receiveAmount > receivingModal.remainingAmount + 0.01) {
+      alert('Valor inválido para recebimento.');
+      return;
+    }
+
+    const newRemaining = Math.max(0, receivingModal.remainingAmount - receiveAmount);
+    const isFullyPaid = newRemaining <= 0.01;
+
+    const updatedFiados = fiados.map((f: FiadoRecord) => {
+       if (f.id === receivingModal.id) {
+          return {
+            ...f,
+            remainingAmount: newRemaining,
+            status: isFullyPaid ? 'paid' : 'pending'
+          };
+       }
+       return f;
+    });
+
+    setFiados(updatedFiados);
+
+    // Lógica de Entrada de Caixa se for Dinheiro/Pix
+    if (cashSession && (receiveMethod === 'Dinheiro' || receiveMethod === 'Pix')) {
+       const newLog: CashLog = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'entrada',
+          amount: receiveAmount,
+          description: `Rec. Pendente: ${receivingModal.clientName} (${receiveMethod})`,
+          time: new Date().toISOString(),
+          user: user.name
+       };
+
+       setCashSession((prev: CashSession) => ({
+          ...prev,
+          currentBalance: prev.currentBalance + (receiveMethod === 'Dinheiro' ? receiveAmount : 0),
+          logs: [newLog, ...prev.logs]
+       }));
+    }
+
+    alert(isFullyPaid ? 'Dívida quitada com sucesso!' : 'Pagamento parcial registrado!');
+    setReceivingModal(null);
+    setReceiveAmount(0);
+  };
+
+  return (
+    <div className="space-y-6 h-full flex flex-col min-h-0 animate-in fade-in">
+       <div>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Gestão de Pendentes (F12)</h2>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Controle de pagamentos pendentes de clientes</p>
+       </div>
+
+       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0">
+          <div className="relative group flex-1">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Buscar por cliente ou descrição..." 
+              className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" 
+              value={search} 
+              onChange={(e) => setSearch(e.target.value)} 
+            />
+          </div>
+       </div>
+
+       <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0">
+          <div className="overflow-auto flex-1 custom-scroll">
+            <table className="w-full text-left border-separate border-spacing-0">
+              <thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b">
+                <tr>
+                  <th className="px-6 py-4">Cliente</th>
+                  <th className="px-6 py-4">Acordo / Descrição</th>
+                  <th className="px-6 py-4">Vencimento</th>
+                  <th className="px-6 py-4 text-right">Valor Inicial</th>
+                  <th className="px-6 py-4 text-right">Pendente</th>
+                  <th className="px-6 py-4 text-right">Ação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pendingFiados.map((f: FiadoRecord) => (
+                  <tr key={f.id} className="hover:bg-slate-50 transition-all">
+                    <td className="px-6 py-4">
+                       <div className="flex flex-col">
+                          <span className="font-bold text-slate-800 text-sm uppercase">{f.clientName}</span>
+                          <span className="text-[9px] font-black text-indigo-500">VENDA #{f.saleId.toString().slice(-4)}</span>
+                       </div>
+                    </td>
+                    <td className="px-6 py-4">
+                       <p className="text-xs font-bold text-slate-500 italic max-w-xs">{f.description}</p>
+                    </td>
+                    <td className="px-6 py-4">
+                       <span className={`px-2 py-1 rounded text-[10px] font-black border ${new Date(f.dueDate) < new Date() ? 'bg-red-50 text-red-600 border-red-100 animate-pulse' : 'bg-slate-100 text-slate-500'}`}>
+                          {new Date(f.dueDate).toLocaleDateString()}
+                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-right font-mono font-bold text-slate-400 text-sm">R$ {formatCurrency(f.totalAmount)}</td>
+                    <td className="px-6 py-4 text-right">
+                       <span className="font-black text-red-600 font-mono text-sm">R$ {formatCurrency(f.remainingAmount)}</span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                       <button 
+                        onClick={() => { setReceivingModal(f); setReceiveAmount(f.remainingAmount); }}
+                        className="bg-green-600 text-white px-4 py-2 rounded-lg font-black text-[10px] uppercase shadow-md hover:bg-green-700 active:scale-95 transition-all"
+                       >
+                          Dar Baixa
+                       </button>
+                    </td>
+                  </tr>
+                ))}
+                {pendingFiados.length === 0 && (
+                   <tr>
+                     <td colSpan={6} className="py-20 text-center text-slate-300 font-bold italic uppercase tracking-widest">Nenhum registro pendente encontrado...</td>
+                   </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+       </div>
+
+       {receivingModal && (
+          <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[200] backdrop-blur-md animate-in fade-in">
+             <form onSubmit={handleReceive} className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6">
+                <div className="flex justify-between items-center border-b pb-4">
+                   <h3 className="text-xl font-black text-slate-900 uppercase italic">Baixa de Pagamento</h3>
+                   <button type="button" onClick={() => setReceivingModal(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button>
+                </div>
+                
+                <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 text-center">
+                   <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Cliente</span>
+                   <p className="text-lg font-black text-indigo-700 uppercase">{receivingModal.clientName}</p>
+                   <div className="mt-2 flex justify-center gap-4">
+                      <div>
+                         <span className="text-[8px] font-black text-slate-400 uppercase block">Total Devido</span>
+                         <span className="font-mono font-black text-red-600">R$ {formatCurrency(receivingModal.remainingAmount)}</span>
+                      </div>
+                   </div>
+                </div>
+
+                <div className="space-y-4">
+                   <div>
+                      <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Valor do Pagamento</label>
+                      <div className="relative">
+                         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-black text-slate-300">R$</span>
+                         <input 
+                           type="text" 
+                           className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 rounded-2xl text-2xl font-black text-indigo-700 outline-none focus:border-indigo-500"
+                           value={formatCurrency(receiveAmount)}
+                           onChange={(e) => setReceiveAmount(parseCurrency(e.target.value))}
+                           onFocus={(e) => e.target.select()}
+                         />
+                      </div>
+                   </div>
+
+                   <div>
+                      <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Meio de Recebimento</label>
+                      <select 
+                        className="w-full border-2 rounded-2xl px-4 py-3 text-sm font-black uppercase bg-slate-50 outline-none"
+                        value={receiveMethod}
+                        onChange={(e) => setReceiveMethod(e.target.value)}
+                      >
+                         <option>Dinheiro</option>
+                         <option>Pix</option>
+                         <option>Cartão</option>
+                      </select>
+                   </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                   <button type="button" onClick={() => setReceivingModal(null)} className="flex-1 py-4 text-slate-400 font-black uppercase text-[10px]">Cancelar</button>
+                   <button type="submit" className="flex-[2] py-4 bg-green-600 text-white font-black rounded-2xl uppercase text-[10px] shadow-xl hover:bg-green-700">Confirmar Recebimento</button>
+                </div>
+             </form>
+          </div>
+       )}
+    </div>
+  );
+};
 
 // --- COMPONENTE BUSCA RÁPIDA DE PRODUTOS ---
 
@@ -1187,7 +1411,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
 
 // --- COMPONENTE PDV ---
 
-const SalesViewComponent = ({ user, products, setProducts, setSales, setMovements, vendedores, cashSession, setCashSession, settings, exchangeCredit, setExchangeCredit, campaigns, setCampaigns }: any) => {
+const SalesViewComponent = ({ user, products, setProducts, setSales, setMovements, vendedores, cashSession, setCashSession, settings, exchangeCredit, setExchangeCredit, campaigns, setCampaigns, fiados, setFiados }: any) => {
   const isMasterUser = user.id === 0 || user.email === 'master@internal';
   const isAdmin = user.role === 'admin' || isMasterUser;
   
@@ -1198,6 +1422,9 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
   const [currentPayMethod, setCurrentPayMethod] = useState('Dinheiro');
   const [currentPayAmount, setCurrentPayAmount] = useState(0);
   const [voucherCodeInput, setVoucherCodeInput] = useState('');
+  const [f12Client, setF12Client] = useState('');
+  const [f12Desc, setF12Desc] = useState('');
+  const [f12Date, setF12Date] = useState('');
   const [installments, setInstallments] = useState(1);
   const [assignedVendedor, setAssignedVendedor] = useState(user.name);
   const [modalFluxo, setModalFluxo] = useState<'entrada' | 'retirada' | null>(null);
@@ -1416,6 +1643,25 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
     };
     setSales((prev: any) => [sale, ...prev]);
 
+    // Lógica para registrar o registro de pagamento (F12)
+    const f12Payments = appliedPayments.filter(p => p.method === 'F12');
+    if (f12Payments.length > 0) {
+       const newFiados: FiadoRecord[] = f12Payments.map(p => ({
+          id: Math.random().toString(36).substr(2, 9),
+          saleId: sale.id,
+          clientName: p.f12ClientName || 'Desconhecido',
+          description: p.f12Description || 'Sem observação',
+          totalAmount: p.amount,
+          remainingAmount: p.amount,
+          createdAt: new Date().toISOString(),
+          dueDate: p.f12DueDate || new Date().toISOString(),
+          vendedor: assignedVendedor,
+          status: 'pending',
+          items: [...cart]
+       }));
+       setFiados((prev: FiadoRecord[]) => [...newFiados, ...prev]);
+    }
+
     // Atualizar Estoque
     setProducts(products.map((p: Product) => {
       const items = cart.filter(i => i.productId === p.id);
@@ -1514,10 +1760,18 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
         return;
     }
 
+    if (currentPayMethod === 'F12') {
+       if (!f12Client.trim()) {
+          alert('Por favor, informe o nome do cliente para o registro F12.');
+          return;
+       }
+    }
+
     let net = currentPayAmount;
     if (currentPayMethod === 'C. Débito') net = currentPayAmount * (1 - settings.cardFees.debit / 100);
     else if (currentPayMethod === 'C. Crédito') net = currentPayAmount * (1 - settings.cardFees.credit1x / 100);
     else if (currentPayMethod === 'C. Parcelado') net = currentPayAmount * (1 - settings.cardFees.creditInstallments / 100);
+    else if (currentPayMethod === 'F12') net = 0; // Faturamento postergado
     
     setAppliedPayments([...appliedPayments, { 
       method: currentPayMethod, 
@@ -1525,8 +1779,16 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       installments: currentPayMethod === 'C. Parcelado' ? installments : undefined,
       installmentValue: currentPayMethod === 'C. Parcelado' ? calculatedInstallment : undefined,
       netAmount: parseFloat(net.toFixed(2)),
-      voucherCode: currentPayMethod === 'Voucher' ? voucherCodeInput.trim().toUpperCase() : undefined
+      voucherCode: currentPayMethod === 'Voucher' ? voucherCodeInput.trim().toUpperCase() : undefined,
+      f12ClientName: currentPayMethod === 'F12' ? f12Client.trim().toUpperCase() : undefined,
+      f12Description: currentPayMethod === 'F12' ? f12Desc.trim() : undefined,
+      f12DueDate: currentPayMethod === 'F12' ? f12Date : undefined
     }]);
+
+    // Limpar campos F12
+    setF12Client('');
+    setF12Desc('');
+    setF12Date('');
     setInstallments(1);
     setCurrentPayAmount(0);
     setVoucherCodeInput('');
@@ -1765,9 +2027,10 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                     <select className="w-full border rounded-lg px-2.5 py-2 bg-slate-50 text-slate-800 font-black text-[10px] uppercase cursor-pointer focus:border-indigo-500 outline-none transition-all" value={currentPayMethod} onChange={e => {
                         const val = e.target.value;
                         setCurrentPayMethod(val);
-                        if (val === 'Voucher VIP') setCurrentPayAmount(remainingBalanceToSettle);
+                        if (val === 'Voucher VIP' || val === 'F12') setCurrentPayAmount(remainingBalanceToSettle);
                     }}>
                       <option>Dinheiro</option><option>Pix</option><option>C. Débito</option><option>C. Crédito</option><option>C. Parcelado</option><option>Voucher</option><option>Voucher VIP</option>
+                      {isAdmin && <option value="F12">F12</option>}
                     </select>
 
                     {currentPayMethod === 'Voucher' && (
@@ -1783,6 +2046,42 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                                 />
                                 <button type="button" onClick={validateVoucher} className="bg-amber-600 text-white px-3 py-1.5 rounded-md font-black text-[9px] uppercase hover:bg-amber-700">Validar</button>
                             </div>
+                        </div>
+                    )}
+
+                    {currentPayMethod === 'F12' && (
+                        <div className="animate-in fade-in slide-in-from-top-1 bg-indigo-50 p-3 rounded-lg border border-indigo-200 space-y-2">
+                           <div>
+                              <label className="text-[8px] font-black uppercase text-indigo-600">Nome do Cliente</label>
+                              <input 
+                                type="text" 
+                                placeholder="CLIENTE AMIGO"
+                                className="w-full border rounded-md px-2 py-1.5 text-[10px] font-black uppercase bg-white outline-none focus:border-indigo-400 mt-0.5"
+                                value={f12Client}
+                                onChange={e => setF12Client(e.target.value.toUpperCase())}
+                              />
+                           </div>
+                           <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                 <label className="text-[8px] font-black uppercase text-indigo-600">Vencimento</label>
+                                 <input 
+                                    type="date" 
+                                    className="w-full border rounded-md px-2 py-1 text-[10px] font-black bg-white outline-none focus:border-indigo-400 mt-0.5"
+                                    value={f12Date}
+                                    onChange={e => setF12Date(e.target.value)}
+                                 />
+                              </div>
+                              <div>
+                                 <label className="text-[8px] font-black uppercase text-indigo-600">Condições/Desc.</label>
+                                 <input 
+                                    type="text" 
+                                    placeholder="Ex: 2x no mês"
+                                    className="w-full border rounded-md px-2 py-1 text-[10px] font-black bg-white outline-none focus:border-indigo-400 mt-0.5"
+                                    value={f12Desc}
+                                    onChange={e => setF12Desc(e.target.value)}
+                                 />
+                              </div>
+                           </div>
                         </div>
                     )}
 
@@ -1809,7 +2108,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                           onChange={e => setCurrentPayAmount(parseCurrency(e.target.value))} 
                         />
                       </div>
-                      <button type="button" onClick={addPayment} className={`px-3 ${currentPayMethod === 'Voucher VIP' ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white rounded-lg active:scale-90 flex items-center justify-center shadow transition-all`} title={currentPayMethod === 'Voucher VIP' ? 'Aplicar VIP' : 'Adicionar Pagamento'}><Plus size={16}/></button>
+                      <button type="button" onClick={addPayment} className={`px-3 ${(currentPayMethod === 'Voucher VIP' || currentPayMethod === 'F12') ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700'} text-white rounded-lg active:scale-90 flex items-center justify-center shadow transition-all`} title={currentPayMethod === 'Voucher VIP' ? 'Aplicar VIP' : 'Adicionar Pagamento'}><Plus size={16}/></button>
                     </div>
                     {appliedPayments.length > 0 && (
                       <div className="mt-3 bg-indigo-50/50 p-3 rounded-xl border border-dashed border-indigo-200 space-y-2 animate-in fade-in">
@@ -1822,11 +2121,12 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                               <div className="flex flex-col min-w-0">
                                 <span className="text-[9px] font-black text-slate-700 uppercase truncate">
                                     {p.method} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}
+                                    {p.method === 'F12' ? ` (${p.f12ClientName})` : ''}
                                 </span>
                                 {p.installments && <span className="text-[7px] text-slate-400 font-bold">{p.installments}x de R$ {formatCurrency(p.installmentValue || 0)}</span>}
                               </div>
                               <div className="flex items-center gap-2 shrink-0 ml-2">
-                                <span className={`text-[10px] font-black font-mono ${p.method === 'Voucher VIP' ? 'text-purple-600' : p.method === 'Voucher' ? 'text-amber-600' : 'text-indigo-600'}`}>R$ {formatCurrency(p.amount)}</span>
+                                <span className={`text-[10px] font-black font-mono ${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'text-purple-600' : p.method === 'Voucher' ? 'text-amber-600' : 'text-indigo-600'}`}>R$ {formatCurrency(p.amount)}</span>
                                 <button type="button" onClick={() => removePayment(idx)} className="text-slate-300 hover:text-red-500 transition-colors p-0.5 hover:bg-red-50 rounded">
                                   <Trash2 size={12} />
                                 </button>
@@ -1920,7 +2220,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                     <p className="text-[9px] font-black text-slate-400 uppercase">FORMA(S) DE PAGAMENTO:</p>
                     {receiptData.payments.map((p, i) => (
                         <div key={i} className="flex justify-between text-[10px]">
-                            <span>{p.method} {p.installments ? `(${p.installments}x)` : ''}</span>
+                            <span>{p.method} {p.installments ? `(${p.installments}x)` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span>
                             <span className="font-bold">R$ {formatCurrency(p.amount)}</span>
                         </div>
                     ))}
@@ -2175,91 +2475,9 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
   );
 };
 
-// --- GESTÃO DE FORNECEDORES ---
-
-const SuppliersViewComponent = ({ suppliers, setSuppliers }: any) => {
-  const [modal, setModal] = useState(false);
-  const [form, setForm] = useState<any>({ name: '', email: '', phone: '' });
-  const save = (e: any) => {
-    e.preventDefault();
-    const id = form.id || Date.now();
-    const s = { ...form, id };
-    if (form.id) setSuppliers((prev: any) => prev.map((x: any) => x.id === id ? s : x));
-    else setSuppliers((prev: any) => [...prev, s]);
-    setModal(false);
-    setForm({ name: '', email: '', phone: '' });
-  };
-  return (
-    <div className="space-y-6 h-full flex flex-col min-h-0">
-      <div className="flex justify-between items-center shrink-0">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Fornecedores</h2>
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gestão de parceiros</p>
-        </div>
-        <button onClick={() => { setForm({ name: '', email: '', phone: '' }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
-          <Plus size={16} /> Novo Fornecedor
-        </button>
-      </div>
-      <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0">
-        <div className="overflow-auto flex-1 custom-scroll">
-          <table className="w-full text-left border-separate border-spacing-0">
-            <thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b">
-              <tr>
-                <th className="px-6 py-4">Nome</th>
-                <th className="px-6 py-4">Contato</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {suppliers.map((s: Supplier) => (
-                <tr key={s.id} className="hover:bg-slate-50 transition-all group">
-                  <td className="px-6 py-4 font-bold text-slate-800 text-sm">{s.name}</td>
-                  <td className="px-6 py-4">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-slate-600">{s.email}</span>
-                      <span className="text-[10px] text-slate-400 font-bold">{s.phone}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button onClick={() => { setForm(s); setModal(true); }} className="p-2 text-slate-400 hover:text-indigo-600"><Edit size={14} /></button>
-                      <button onClick={() => setSuppliers(suppliers.filter((x: any) => x.id !== s.id))} className="p-2 text-slate-400 hover:text-red-600"><Trash2 size={14}/></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {suppliers.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="py-20 text-center text-slate-300 font-bold italic">Nenhum fornecedor cadastrado...</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {modal && (
-        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in">
-          <form onSubmit={save} className="bg-white p-8 rounded-[2rem] w-full max-md shadow-2xl space-y-6">
-            <h3 className="text-xl font-black text-slate-900 uppercase italic border-b pb-4">{form.id ? 'Editar' : 'Novo'} Fornecedor</h3>
-            <div className="space-y-4">
-              <div><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Nome</label><input className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
-              <div><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Email</label><input type="email" className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} required /></div>
-              <div><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Telefone</label><input className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required /></div>
-            </div>
-            <div className="flex justify-end gap-3 pt-6 border-t mt-4">
-              <button type="button" onClick={() => setModal(false)} className="px-5 py-2 text-slate-400 font-black uppercase text-[10px]">CANCELAR</button>
-              <button type="submit" className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-black uppercase text-[10px] shadow-xl">SALVAR</button>
-            </div>
-          </form>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // --- COMPONENTE DASHBOARD ---
 
-const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
+const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHistory }: any) => {
   const [period, setPeriod] = useState<'day' | 'month' | 'year'>('day');
   const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0, 10));
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -2272,6 +2490,7 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
     localStorage.setItem('dash_comm_prem', commPremium.toString());
     localStorage.setItem('dash_comm_thresh', commThreshold.toString());
   }, [commBase, commPremium, commThreshold]);
+
   const filteredSales = useMemo(() => {
     return sales.filter((s: Sale) => {
       const d = new Date(s.date);
@@ -2289,6 +2508,63 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
       return true;
     });
   }, [sales, period, selectedDay, selectedMonth, selectedYear]);
+
+  const stats = useMemo(() => {
+    let totals = { total: 0, cash: 0, pix: 0, card: 0, voucher: 0, voucherVip: 0, f12: 0, count: 0 };
+    let productsCount: Record<number, { name: string, qty: number, size?: string, color?: string }> = {};
+
+    filteredSales.forEach((s: Sale) => {
+      totals.count += 1;
+      s.payments.forEach(p => {
+        // Apenas soma ao faturamento bruto o que NÃO for F12
+        if (p.method !== 'F12') {
+           totals.total += p.amount;
+           if (p.method === 'Dinheiro') totals.cash += p.amount; 
+           else if (p.method === 'Pix') totals.pix += p.amount; 
+           else if (p.method === 'Voucher') totals.voucher += p.amount;
+           else if (p.method === 'Voucher VIP') totals.voucherVip += p.amount;
+           else totals.card += p.amount;
+        } else {
+           totals.f12 += p.amount;
+        }
+      });
+      s.items.forEach(item => {
+        if (!productsCount[item.productId]) { productsCount[item.productId] = { name: item.name, qty: 0, size: item.size, color: item.color }; }
+        productsCount[item.productId].qty += item.quantity;
+      });
+    });
+
+    // Adicionar recebimentos de registros pendentes feitos no período
+    const allLogs = [
+      ...(cashSession?.logs || []),
+      ...(cashHistory?.flatMap((h: any) => h.logs) || [])
+    ];
+
+    allLogs.forEach(log => {
+       const logDate = new Date(log.time);
+       let matchPeriod = false;
+       if (period === 'day') {
+          const [y, m, d] = selectedDay.split('-').map(Number);
+          matchPeriod = logDate.getFullYear() === y && (logDate.getMonth() + 1) === m && logDate.getDate() === d;
+       } else if (period === 'month') {
+          const [y, m] = selectedMonth.split('-').map(Number);
+          matchPeriod = logDate.getFullYear() === y && (logDate.getMonth() + 1) === m;
+       } else {
+          matchPeriod = logDate.getFullYear() === Number(selectedYear);
+       }
+
+       if (matchPeriod && log.description.startsWith('Rec. Pendente:')) {
+          totals.total += log.amount;
+          if (log.description.includes('(Dinheiro)')) totals.cash += log.amount;
+          else if (log.description.includes('(Pix)')) totals.pix += log.amount;
+          else totals.card += log.amount;
+       }
+    });
+
+    const productsRank = Object.values(productsCount).sort((a, b) => b.qty - a.qty).slice(0, 5);
+    return { totals, productsRank };
+  }, [filteredSales, cashSession, cashHistory, period, selectedDay, selectedMonth, selectedYear]);
+
   const commissionContext = useMemo(() => {
     let sellersMap: Record<string, number> = {};
     let totalMonthly = 0;
@@ -2304,30 +2580,11 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
     });
     return { sellers: Object.entries(sellersMap).sort((a, b) => b[1] - a[1]), total: totalMonthly };
   }, [sales, period, selectedDay, selectedMonth, selectedYear]);
-  const stats = useMemo(() => {
-    let totals = { total: 0, cash: 0, pix: 0, card: 0, voucher: 0, voucherVip: 0, count: 0 };
-    let productsCount: Record<number, { name: string, qty: number, size?: string, color?: string }> = {};
-    filteredSales.forEach((s: Sale) => {
-      totals.total += s.total; totals.count += 1;
-      s.payments.forEach(p => {
-        if (p.method === 'Dinheiro') totals.cash += p.amount; 
-        else if (p.method === 'Pix') totals.pix += p.amount; 
-        else if (p.method === 'Voucher') totals.voucher += p.amount;
-        else if (p.method === 'Voucher VIP') totals.voucherVip += p.amount;
-        else totals.card += p.amount;
-      });
-      s.items.forEach(item => {
-        if (!productsCount[item.productId]) { productsCount[item.productId] = { name: item.name, qty: 0, size: item.size, color: item.color }; }
-        productsCount[item.productId].qty += item.quantity;
-      });
-    });
-    const productsRank = Object.values(productsCount).sort((a, b) => b.qty - a.qty).slice(0, 5);
-    return { totals, productsRank };
-  }, [filteredSales]);
 
   const totalReceivedForBadges = stats.totals.cash + stats.totals.pix + stats.totals.card + stats.totals.voucher + stats.totals.voucherVip;
   const totalStock = products.reduce((acc: number, p: any) => acc + p.stock, 0);
   const totalStockCost = products.reduce((acc: number, p: any) => acc + (p.cost * p.stock), 0);
+  const totalFiadoPending = fiados.filter((f: FiadoRecord) => f.status === 'pending').reduce((acc: number, f: FiadoRecord) => acc + f.remainingAmount, 0);
   
   return (
     <div className="space-y-8 animate-in fade-in h-full flex flex-col pb-10">
@@ -2347,9 +2604,9 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <CardStat icon={<TrendingUp size={24}/>} label="Faturamento" val={`R$ ${stats.totals.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} color="green" />
+        <CardStat icon={<TrendingUp size={24}/>} label="Faturamento Real" val={`R$ ${stats.totals.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} color="green" />
         <CardStat icon={<Wallet size={24}/>} label="Caixa Atual" val={`R$ ${cashSession?.currentBalance?.toFixed(2) || '0.00'}`} color="indigo" />
-        <CardStat icon={<ShoppingCart size={24}/>} label="Volume Vendas" val={stats.totals.count} color="amber" />
+        <CardStat icon={<HandCoins size={24}/>} label="Pendente (F12)" val={`R$ ${formatCurrency(totalFiadoPending)}`} color="red" />
         <CardStat icon={<Box size={24}/>} label="Total Estoque" val={`${totalStock} peças`} subVal={`Custo Total R$ ${formatCurrency(totalStockCost)}`} color="blue" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2361,7 +2618,7 @@ const DashboardViewComponent = ({ products, sales, cashSession }: any) => {
                  <PaymentBadge label="Pix" val={stats.totals.pix} color="blue" total={totalReceivedForBadges} icon={<QrCode size={16}/>} />
                  <PaymentBadge label="Cartão" val={stats.totals.card} color="indigo" total={totalReceivedForBadges} icon={<CreditCard size={16}/>} />
                  <PaymentBadge label="Voucher" val={stats.totals.voucher} color="amber" total={totalReceivedForBadges} icon={<Gift size={16}/>} />
-                 <PaymentBadge label="Voucher VIP" val={stats.totals.voucherVip} color="purple" total={totalReceivedForBadges} icon={<ShieldIcon size={16}/>} />
+                 <PaymentBadge label="Pendentes (F12)" val={stats.totals.f12} color="red" total={totalReceivedForBadges + stats.totals.f12} icon={<HandCoins size={16}/>} />
               </div>
            </div>
            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
@@ -2518,11 +2775,11 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
       {tab === 'sales' && showSalesTab && (<><div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0"><div className="relative group flex-1"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Filtrar por ID, vendedor ou produto..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} /></div></div><div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data/Hora</th><th className="px-6 py-4">ID</th><th className="px-6 py-4">Vendedor</th><th className="px-6 py-4 text-right">Total</th><th className="px-6 py-4 text-center">Itens</th><th className="px-6 py-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredSales.map((s: Sale) => (<tr key={s.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(s.date).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(s.date).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-[10px] font-mono font-black text-indigo-600">#{s.id.toString().slice(-6)}</td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{s.user}</td><td className="px-6 py-4 text-right font-black text-slate-900 font-mono text-xs">R$ {formatCurrency(s.total)}</td><td className="px-6 py-4 text-center"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500">{s.items.length}</span></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setSelectedSale(s)} className="p-2 text-slate-400 hover:text-indigo-600" title="Ver Detalhes"><Eye size={16}/></button>{canDelete && <button onClick={() => handleDeleteSale(s)} className="p-2 text-slate-400 hover:text-red-600" title="Excluir"><Trash2 size={16}/></button>}</div></td></tr>))}{filteredSales.length === 0 && (<tr><td colSpan={6} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma venda encontrada para este período...</td></tr>)}</tbody></table></div></div></>)}
       {tab === 'fluxo' && showFluxoTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data e Hora</th><th className="px-6 py-4">Usuário</th><th className="px-6 py-4">Tipo</th><th className="px-6 py-4">Descrição/Motivo</th><th className="px-6 py-4 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100">{cashLogs.map((log) => (<tr key={log.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(log.time).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(log.time).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase italic tracking-tight">{log.user}</td><td className="px-6 py-4"><span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${log.type === 'entrada' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{log.type === 'entrada' ? 'Entrada' : 'Sangria'}</span></td><td className="px-6 py-4 text-xs font-bold text-slate-500 max-w-xs truncate">{log.description || '-'}</td><td className={`px-6 py-4 text-right font-black font-mono text-xs ${log.type === 'entrada' ? 'text-green-600' : 'text-red-600'}`}>{log.type === 'entrada' ? '+' : '-'} R$ {formatCurrency(log.amount)}</td></tr>))}{cashLogs.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma movimentação de caixa encontrada...</td></tr>)}</tbody></table></div></div>)}
       {tab === 'cash' && showCashTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Abertura / Fechamento</th><th className="px-6 py-4">Usuários</th><th className="px-6 py-4 text-right">Saldo Inicial</th><th className="px-6 py-4 text-right">Saldo Final</th><th className="px-6 py-4 text-center">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredCashHistory.map((h: CashHistoryEntry) => (<tr key={h.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col gap-1"><div className="flex items-center gap-2 text-[10px] font-bold text-green-600"><Clock size={10} /> {new Date(h.openedAt).toLocaleString()}</div><div className="flex items-center gap-2 text-[10px] font-bold text-red-500"><Clock size={10} /> {new Date(h.closedAt).toLocaleString()}</div></div></td><td className="px-6 py-4"><div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase text-slate-400">AB: {h.openedBy}</span><span className="text-[10px] font-black uppercase text-slate-400">FC: {h.closedBy}</span></div></td><td className="px-6 py-4 text-right text-xs font-mono font-bold text-slate-500">R$ {formatCurrency(h.openingBalance)}</td><td className="px-6 py-4 text-right text-xs font-mono font-black text-slate-900">R$ {formatCurrency(h.closingBalance)}</td><td className="px-6 py-4 text-center"><span className="px-3 py-1 bg-slate-100 rounded-full text-[9px] font-black text-slate-400 uppercase">Encerrado</span></td></tr>))}{filteredCashHistory.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhum histórico de caixa encontrado para este período...</td></tr>)}</tbody></table></div></div>)}
-      {selectedSale && (<div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in"><div className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll"><div className="flex justify-between items-center border-b pb-4"><h3 className="text-xl font-black text-slate-900 uppercase italic">Detalhes da Venda #{selectedSale.id.toString().slice(-6)}</h3><div className="flex items-center gap-2"><button onClick={() => setReprintSale(selectedSale)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Reimprimir Cupom"><Printer size={20}/></button><button onClick={() => setSelectedSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button></div></div><div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-2xl border"><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Data / Hora</p><p className="text-xs font-bold text-slate-700">{new Date(selectedSale.date).toLocaleString()}</p></div><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendedor</p><p className="text-xs font-black text-indigo-600 uppercase">{selectedSale.user}</p></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produtos Vendidos</h4><div className="border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 font-black text-slate-500 uppercase text-[9px]"><tr><th className="px-4 py-2">Item</th><th className="px-4 py-2 text-center">Qtd</th><th className="px-4 py-2 text-right">Total</th><th className="px-4 py-2 text-center">Troca</th></tr></thead><tbody className="divide-y">{selectedSale.items.map((it, i) => (<tr key={i} className={`bg-white ${it.isExchanged ? 'opacity-50 grayscale' : ''}`}><td className="px-4 py-3"><div className="flex flex-col"><span className="font-bold">{it.name}</span><span className="text-[9px] text-slate-400 font-mono">{it.sku}</span><span className="text-[8px] text-slate-500 italic mt-0.5 uppercase tracking-tighter">tam: {it.size || '-'} / cor: {it.color || '-'}</span>{it.isExchanged && <span className="text-[7px] font-black text-red-500 uppercase mt-0.5 animate-pulse">Item Trocado</span>}</div></td><td className="px-4 py-3 text-center font-bold">{it.quantity}</td><td className="px-4 py-3 text-right font-mono font-bold text-indigo-600">R$ {formatCurrency((it.price * it.quantity) - it.discountValue - it.manualDiscountValue)}</td><td className="px-4 py-3 text-center">{canExchange && !it.isExchanged && (<button onClick={() => handleItemExchange(selectedSale, it)} className="p-1.5 bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white rounded-lg transition-all shadow-sm" title="Trocar Item"><RotateCcw size={14}/></button>)}</td></tr>))}</tbody></table></div></div><div className="border-t pt-6 flex flex-col items-end gap-2"><div className="flex justify-between w-64 text-xs font-bold text-slate-400"><span>Subtotal</span><span className="font-mono">R$ {formatCurrency(selectedSale.subtotal)}</span></div><div className="flex justify-between w-64 text-xs font-bold text-red-400"><span>Desconto ({selectedSale.discountPercent.toFixed(1)}%)</span><span className="font-mono">- R$ {formatCurrency(selectedSale.discount)}</span></div>{selectedSale.exchangeCreditUsed && selectedSale.exchangeCreditUsed > 0 && (<div className="flex justify-between w-64 text-xs font-bold text-amber-500"><span>Crédito Utilizado</span><span className="font-mono">- R$ {formatCurrency(selectedSale.exchangeCreditUsed)}</span></div>)}<div className="flex justify-between w-64 text-xl font-black text-slate-900 border-t pt-2"><span className="italic uppercase tracking-tighter">Total Pago</span><span className="font-mono">R$ {formatCurrency(selectedSale.total)}</span></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Meios de Pagamento</h4><div className="flex flex-wrap gap-2">{selectedSale.payments.map((p, i) => (<div key={i} className={`bg-${p.method === 'Voucher VIP' ? 'purple' : 'indigo'}-50 border border-${p.method === 'Voucher VIP' ? 'purple' : 'indigo'}-100 px-3 py-2 rounded-xl flex flex-col`}><span className={`text-[8px] font-black text-${p.method === 'Voucher VIP' ? 'purple' : 'indigo'}-400 uppercase`}>{p.method} {p.installments ? `${p.installments}x` : ''} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}</span><span className={`text-xs font-black text-${p.method === 'Voucher VIP' ? 'purple' : 'indigo'}-600 font-mono`}>R$ {formatCurrency(p.amount)}</span></div>))}</div></div></div></div>)}
+      {selectedSale && (<div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in"><div className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll"><div className="flex justify-between items-center border-b pb-4"><h3 className="text-xl font-black text-slate-900 uppercase italic">Detalhes da Venda #{selectedSale.id.toString().slice(-6)}</h3><div className="flex items-center gap-2"><button onClick={() => setReprintSale(selectedSale)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Reimprimir Cupom"><Printer size={20}/></button><button onClick={() => setSelectedSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button></div></div><div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-2xl border"><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Data / Hora</p><p className="text-xs font-bold text-slate-700">{new Date(selectedSale.date).toLocaleString()}</p></div><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendedor</p><p className="text-xs font-black text-indigo-600 uppercase">{selectedSale.user}</p></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produtos Vendidos</h4><div className="border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 font-black text-slate-500 uppercase text-[9px]"><tr><th className="px-4 py-2">Item</th><th className="px-4 py-2 text-center">Qtd</th><th className="px-4 py-2 text-right">Total</th><th className="px-4 py-2 text-center">Troca</th></tr></thead><tbody className="divide-y">{selectedSale.items.map((it, i) => (<tr key={i} className={`bg-white ${it.isExchanged ? 'opacity-50 grayscale' : ''}`}><td className="px-4 py-3"><div className="flex flex-col"><span className="font-bold">{it.name}</span><span className="text-[9px] text-slate-400 font-mono">{it.sku}</span><span className="text-[8px] text-slate-500 italic mt-0.5 uppercase tracking-tighter">tam: {it.size || '-'} / cor: {it.color || '-'}</span>{it.isExchanged && <span className="text-[7px] font-black text-red-500 uppercase mt-0.5 animate-pulse">Item Trocado</span>}</div></td><td className="px-4 py-3 text-center font-bold">{it.quantity}</td><td className="px-4 py-3 text-right font-mono font-bold text-indigo-600">R$ {formatCurrency((it.price * it.quantity) - it.discountValue - it.manualDiscountValue)}</td><td className="px-4 py-3 text-center">{canExchange && !it.isExchanged && (<button onClick={() => handleItemExchange(selectedSale, it)} className="p-1.5 bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white rounded-lg transition-all shadow-sm" title="Trocar Item"><RotateCcw size={14}/></button>)}</td></tr>))}</tbody></table></div></div><div className="border-t pt-6 flex flex-col items-end gap-2"><div className="flex justify-between w-64 text-xs font-bold text-slate-400"><span>Subtotal</span><span className="font-mono">R$ {formatCurrency(selectedSale.subtotal)}</span></div><div className="flex justify-between w-64 text-xs font-bold text-red-400"><span>Desconto ({selectedSale.discountPercent.toFixed(1)}%)</span><span className="font-mono">- R$ {formatCurrency(selectedSale.discount)}</span></div>{selectedSale.exchangeCreditUsed && selectedSale.exchangeCreditUsed > 0 && (<div className="flex justify-between w-64 text-xs font-bold text-amber-500"><span>Crédito Utilizado</span><span className="font-mono">- R$ {formatCurrency(selectedSale.exchangeCreditUsed)}</span></div>)}<div className="flex justify-between w-64 text-xl font-black text-slate-900 border-t pt-2"><span className="italic uppercase tracking-tighter">Total Pago</span><span className="font-mono">R$ {formatCurrency(selectedSale.total)}</span></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Meios de Pagamento</h4><div className="flex flex-wrap gap-2">{selectedSale.payments.map((p, i) => (<div key={i} className={`bg-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-50 border border-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-100 px-3 py-2 rounded-xl flex flex-col`}><span className={`text-[8px] font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-400 uppercase`}>{p.method} {p.installments ? `${p.installments}x` : ''} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span><span className={`text-xs font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-600 font-mono`}>R$ {formatCurrency(p.amount)}</span></div>))}</div></div></div></div>)}
 
       {reprintSale && (
         <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-6 z-[150] backdrop-blur-sm animate-in fade-in no-print-overlay">
-          <div className="bg-white p-8 rounded-[2.5rem] w-full max-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
+          <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
              <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full mx-auto flex items-center justify-center border border-indigo-100">
                     <Printer size={32} strokeWidth={3} />
@@ -2587,7 +2844,7 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
                     <p className="text-[9px] font-black text-slate-400 uppercase">FORMA(S) DE PAGAMENTO:</p>
                     {reprintSale.payments.map((p, i) => (
                         <div key={i} className="flex justify-between text-[10px]">
-                            <span>{p.method} {p.installments ? `(${p.installments}x)` : ''}</span>
+                            <span>{p.method} {p.installments ? `(${p.installments}x)` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span>
                             <span className="font-bold">R$ {formatCurrency(p.amount)}</span>
                         </div>
                     ))}
@@ -2678,7 +2935,7 @@ const SettingsViewComponent = ({ settings, setSettings, categories, setCategorie
                 </div>
               </div>
               <div className="space-y-6 border-t pt-6"><h3 className="text-lg font-black text-slate-800 uppercase italic border-b pb-4">Taxas Bancárias (%)</h3><div className="grid grid-cols-3 gap-4">{['debit', 'credit1x', 'creditInstallments'].map(key => (<div key={key}><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">{key === 'debit' ? 'Débito' : key === 'credit1x' ? 'Crédito 1x' : 'C. Parcelado'}</label><input type="number" step="0.01" onFocus={(e) => e.target.select()} className="w-full border-2 rounded-xl px-4 py-3 text-indigo-600 font-black text-sm" value={(localSettings.cardFees as any)[key]} onChange={e => setLocalSettings({...localSettings, cardFees: {...localSettings.cardFees, [key]: Number(e.target.value)}})} /></div>))}</div></div><div className="space-y-6 border-t pt-6"><h3 className="text-lg font-black text-slate-800 uppercase italic border-b pb-4">Política de Desconto</h3><div><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Limite Máximo de Desconto (%)</label><div className="flex items-center gap-3"><input type="number" step="1" onFocus={(e) => e.target.select()} className="w-32 border-2 rounded-xl px-4 py-3 text-red-600 font-black text-sm" value={localSettings.maxGlobalDiscount} onChange={e => setLocalSettings({...localSettings, maxGlobalDiscount: Number(e.target.value)})} /><span className="text-xs font-bold text-slate-400">Limite apenas para vendedor, administrador não se aplica.</span></div></div></div></div>
-           <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-6"><h3 className="text-lg font-black text-slate-800 uppercase italic border-b pb-4">Permissões do Vendedor</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[{id: 'reports_fluxo', label: 'RELATÓRIOS - ENTRADAS/SANGRIAS'}, {id: 'reports_cash', label: 'RELATÓRIOS - HISTÓRICO CAIXA'}, {id: 'stock', label: 'ESTOQUE'}, {id: 'suppliers', label: 'FORNECEDORES'}, {id: 'dashboard', label: 'DASHBOARD'}, {id: 'campaigns', label: 'CAMPANHAS'}, {id: 'delete_sale', label: 'EXCLUIR VENDA'}, {id: 'exchange_sale', label: 'REALIZAR TROCA'}].map(v => (<label key={v.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-indigo-50 transition-colors"><input type="checkbox" className="w-4 h-4 rounded text-indigo-600" checked={(localSettings.sellerPermissions || []).includes(v.id)} onChange={() => togglePermission(v.id)} /><span className="text-xs font-black text-slate-700 uppercase">{v.label}</span></label>))}</div><p className="text-[9px] font-bold text-slate-400 uppercase italic">Configure o que é relevante para o vendedor acessar.</p></div>
+           <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-6"><h3 className="text-lg font-black text-slate-800 uppercase italic border-b pb-4">Permissões do Vendedor</h3><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[{id: 'reports_fluxo', label: 'RELATÓRIOS - ENTRADAS/SANGRIAS'}, {id: 'reports_cash', label: 'RELATÓRIOS - HISTÓRICO CAIXA'}, {id: 'stock', label: 'ESTOQUE'}, {id: 'dashboard', label: 'DASHBOARD'}, {id: 'campaigns', label: 'CAMPANHAS'}, {id: 'delete_sale', label: 'EXCLUIR VENDA'}, {id: 'exchange_sale', label: 'REALIZAR TROCA'}, {id: 'fiado', label: 'PENDENTES (F12)'}].map(v => (<label key={v.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 cursor-pointer hover:bg-indigo-50 transition-colors"><input type="checkbox" className="w-4 h-4 rounded text-indigo-600" checked={(localSettings.sellerPermissions || []).includes(v.id)} onChange={() => togglePermission(v.id)} /><span className="text-xs font-black text-slate-700 uppercase">{v.label}</span></label>))}</div><p className="text-[9px] font-bold text-slate-400 uppercase italic">Configure o que é relevante para o vendedor acessar.</p></div>
         </div>
         <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm space-y-6 flex flex-col h-full"><h3 className="text-lg font-black text-slate-800 uppercase italic border-b pb-4">Gestão de Categorias</h3><div className="flex gap-2"><input type="text" placeholder="Nova categoria..." className="flex-1 border-2 rounded-xl px-4 py-3 text-sm" value={newCategory} onChange={e => setNewCategory(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddCategory()} /><button onClick={handleAddCategory} className="bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-lg active:scale-95"><Plus size={18}/></button></div><div className="flex-1 overflow-auto custom-scroll pr-2 max-h-[500px] border border-slate-100 rounded-2xl p-4 bg-slate-50/50"><div className="space-y-2">{sortedCategories.map((cat: string) => (<div key={cat} className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-slate-100 group hover:border-indigo-200 transition-all shadow-sm"><div className="flex items-center gap-3"><Layers size={14} className="text-indigo-400 opacity-50"/><span className="text-xs font-black text-slate-700 uppercase tracking-tight">{cat}</span></div>{cat !== 'Sem Categoria' && (<button onClick={() => handleDeleteCategory(cat)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>)}</div>))}</div><div className="text-center mt-4"><p className="text-[8px] font-black text-slate-300 uppercase tracking-widest leading-none">Deslize para ver todas</p></div></div></div>
       </div>
@@ -2690,10 +2947,102 @@ const SettingsViewComponent = ({ settings, setSettings, categories, setCategorie
 
 const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
   const [editModal, setEditModal] = useState<User | null>(null);
-  const handleDeleteUser = (id: number) => { if (id === currentUser.id) return alert('Você não pode excluir seu próprio usuário!'); if (window.confirm('Excluir este colaborador?')) setUsers(users.filter((u: User) => u.id !== id)); };
-  const handleUpdateProfile = (e: React.FormEvent) => { e.preventDefault(); if (!editModal) return; setUsers(users.map((u: User) => u.id === editModal.id ? editModal : u)); setEditModal(null); alert('Perfil atualizado!'); };
+  const [showPass, setShowPass] = useState(false);
+
+  const handleToggleShowPass = () => {
+    if (showPass) {
+      setShowPass(false);
+      return;
+    }
+    const isMaster = currentUser.id === 0 || currentUser.email === 'master@internal';
+    if (isMaster) {
+      setShowPass(true);
+    } else {
+      const confirmPass = window.prompt("Confirme sua senha de administrador para visualizar:");
+      if (confirmPass === currentUser.password) {
+        setShowPass(true);
+      } else if (confirmPass !== null) {
+        alert("Senha incorreta!");
+      }
+    }
+  };
+
+  const handleDeleteUser = (id: number) => { 
+    if (id === currentUser.id) return alert('Você não pode excluir seu próprio usuário!'); 
+    if (window.confirm('Excluir este colaborador?')) setUsers(users.filter((u: User) => u.id !== id)); 
+  };
+
+  const handleUpdateProfile = (e: React.FormEvent) => { 
+    e.preventDefault(); 
+    if (!editModal) return; 
+    setUsers(users.map((u: User) => u.id === editModal.id ? editModal : u)); 
+    setEditModal(null); 
+    setShowPass(false);
+    alert('Perfil atualizado!'); 
+  };
+
   return (
-    <div className="space-y-8 animate-in fade-in"><div className="flex flex-col"><h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Gestão de Equipe</h2><p className="text-slate-400 font-black text-[9px] uppercase tracking-[0.2em]">Controle de acessos</p></div><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{users.map((u: User) => (<div key={u.id} className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-xl transition-all text-center"><div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-2xl mx-auto mb-4 flex items-center justify-center border"><UserIcon size={28} /></div><h3 className="text-lg font-black text-slate-800 uppercase mb-1">{u.name}</h3><p className="text-[10px] font-bold text-slate-400 mb-4">{u.email}</p><span className={`px-4 py-1 rounded-full text-[8px] font-black uppercase border ${u.role === 'admin' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>{u.role}</span><div className="border-t border-slate-100 mt-6 pt-4 flex justify-center gap-3"><button onClick={() => setEditModal(u)} className="text-[9px] font-black uppercase text-indigo-600">Editar</button>{u.id !== currentUser.id && (<button onClick={() => handleDeleteUser(u.id)} className="text-[9px] font-black uppercase text-red-400">Excluir</button>)}</div></div>))}</div>{editModal && (<div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in"><form onSubmit={handleUpdateProfile} className="bg-white p-10 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-5"><h3 className="text-2xl font-black text-slate-900 uppercase italic">Editar Usuário</h3><div className="space-y-4"><input className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.name} onChange={e => setEditModal({...editModal, name: e.target.value})} required placeholder="Nome" /><input type="email" className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.email} onChange={e => setEditModal({...editModal, email: e.target.value})} required placeholder="E-mail" /><input type="text" className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.password || ''} onChange={e => setEditModal({...editModal, password: e.target.value})} placeholder="Nova Senha" /><select className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.role} onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}><option value="atendente">Atendente</option><option value="admin">Admin</option></select></div><div className="flex justify-end gap-3 pt-6"><button type="button" onClick={() => setEditModal(null)} className="text-slate-400 font-black uppercase text-[10px]">Cancelar</button><button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black uppercase text-[10px]">Salvar</button></div></form></div>)}</div>
+    <div className="space-y-8 animate-in fade-in">
+      <div className="flex flex-col">
+        <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Gestão de Equipe</h2>
+        <p className="text-slate-400 font-black text-[9px] uppercase tracking-[0.2em]">Controle de acessos</p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {users.map((u: User) => (
+          <div key={u.id} className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm hover:shadow-xl transition-all text-center">
+            <div className="w-16 h-16 bg-slate-50 text-slate-300 rounded-2xl mx-auto mb-4 flex items-center justify-center border">
+              <UserIcon size={28} />
+            </div>
+            <h3 className="text-lg font-black text-slate-800 uppercase mb-1">{u.name}</h3>
+            <p className="text-[10px] font-bold text-slate-400 mb-4">{u.email}</p>
+            <span className={`px-4 py-1 rounded-full text-[8px] font-black uppercase border ${u.role === 'admin' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+              {u.role}
+            </span>
+            <div className="border-t border-slate-100 mt-6 pt-4 flex justify-center gap-3">
+              <button onClick={() => { setEditModal(u); setShowPass(false); }} className="text-[9px] font-black uppercase text-indigo-600">Editar</button>
+              {u.id !== currentUser.id && (
+                <button onClick={() => handleDeleteUser(u.id)} className="text-[9px] font-black uppercase text-red-400">Excluir</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      {editModal && (
+        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in">
+          <form onSubmit={handleUpdateProfile} className="bg-white p-10 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-5">
+            <h3 className="text-2xl font-black text-slate-900 uppercase italic">Editar Usuário</h3>
+            <div className="space-y-4">
+              <input className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.name} onChange={e => setEditModal({...editModal, name: e.target.value})} required placeholder="Nome" />
+              <input type="email" className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.email} onChange={e => setEditModal({...editModal, email: e.target.value})} required placeholder="E-mail" />
+              <div className="relative">
+                <input 
+                  type={showPass ? "text" : "password"} 
+                  className="w-full border-2 rounded-xl px-4 py-3 text-sm pr-12" 
+                  value={editModal.password || ''} 
+                  onChange={e => setEditModal({...editModal, password: e.target.value})} 
+                  placeholder="Nova Senha" 
+                />
+                <button 
+                  type="button" 
+                  onClick={handleToggleShowPass}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  <Eye size={18} className={showPass ? "text-indigo-600" : ""} />
+                </button>
+              </div>
+              <select className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.role} onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}>
+                <option value="atendente">Atendente</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div className="flex justify-end gap-3 pt-6">
+              <button type="button" onClick={() => { setEditModal(null); setShowPass(false); }} className="text-slate-400 font-black uppercase text-[10px]">Cancelar</button>
+              <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black uppercase text-[10px]">Salvar</button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
   );
 };
 
