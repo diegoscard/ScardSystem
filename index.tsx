@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -15,8 +14,6 @@ import {
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DE SEGURANÇA (CHAVES DE ACESSO) ---
-// Estas chaves liberam o acesso ao terminal. Se alteradas aqui e feito deploy, 
-// o sistema exigirá a nova chave imediatamente no próximo carregamento.
 const VALID_ACCESS_KEYS = [
   'A6OAQ-HH78Z-TMMWR-9P8V6-CG4WI', //-- RD STREET
   'Master',
@@ -27,7 +24,6 @@ const VALID_ACCESS_KEYS = [
 const getDeviceFingerprint = () => {
   const { userAgent, language, hardwareConcurrency, platform } = navigator;
   const { width, height, colorDepth, availWidth, availHeight } = window.screen;
-  // Cria uma assinatura única baseada nas características do hardware e navegador para evitar colisões
   return `${userAgent}|${language}|${hardwareConcurrency}|${platform}|${width}x${height}|${availWidth}x${availHeight}|${colorDepth}`;
 };
 
@@ -36,7 +32,7 @@ const generateHWID = (str: string) => {
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash; 
   }
   return Math.abs(hash).toString(36).toUpperCase();
 };
@@ -76,8 +72,8 @@ interface AppSettings {
   sellerPermissions: string[]; 
   storeAddress?: string;
   storeCnpj?: string;
-  storeName?: string; // Novo campo
-  storeTagline?: string; // Novo campo
+  storeName?: string; 
+  storeTagline?: string; 
 }
 
 interface Product {
@@ -93,6 +89,7 @@ interface Product {
   color: string;
   active: boolean;
   supplierId?: number;
+  discountBlocked?: boolean; // Bloqueio de desconto no produto
 }
 
 interface StockMovement {
@@ -116,10 +113,13 @@ interface SaleItem {
   size?: string;
   color?: string;
   discountValue: number; 
-  manualDiscountValue: number; // Campo de desconto manual por produto
+  manualDiscountValue: number; 
+  manualDiscountInput?: number; // Valor bruto digitado no input do item
+  manualDiscountType?: 'value' | 'percent'; // Tipo de desconto do item
   isExchanged?: boolean; 
   campaignName?: string; 
-  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher' | 'single_price';
+  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle';
+  discountBlocked?: boolean; // Herdado do produto
 }
 
 interface PaymentRecord {
@@ -203,14 +203,15 @@ interface Campaign {
   id: number;
   name: string;
   description: string;
-  type: 'percentage' | 'buy_x_get_y' | 'voucher' | 'single_price';
+  type: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle';
   discountPercent: number;
-  fixedPrice?: number;
-  pagueX?: number; // Qtd Paga (ex: 2)
-  leveY?: number;  // Qtd Levada (ex: 3)
+  pagueX?: number; 
+  leveY?: number;  
   voucherCode?: string;
   voucherValue?: number;
   voucherQuantity?: number;
+  bundleQuantity?: number; // Qtd para o combo (ex: 3)
+  bundlePrice?: number;    // Preço fixo do combo (ex: 100)
   startDate: string;
   endDate: string;
   active: boolean;
@@ -227,7 +228,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     credit1x: 3.49,
     creditInstallments: 4.99
   },
-  sellerPermissions: ['exchange_sale'],
+  sellerPermissions: ['exchange_sale', 'fiado', 'stock', 'dashboard', 'campaigns'],
   storeAddress: 'Rua da Moda, 123 - Centro',
   storeCnpj: '00.000.000/0001-00',
   storeName: 'SCARD SYS',
@@ -243,7 +244,6 @@ const INITIAL_CATEGORIES = [
 // --- COMPONENTE PRINCIPAL ---
 
 const App = () => {
-  // SEGURANÇA: isUnlocked agora verifica se há uma chave salva que ainda seja válida.
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [accessKeyInput, setAccessKeyInput] = useState('');
   const [rememberKey, setRememberKey] = useState(false);
@@ -291,11 +291,9 @@ const App = () => {
 
   const deviceHwid = useMemo(() => generateHWID(getDeviceFingerprint()), []);
 
-  // Efeito para verificar chave memorizada ao iniciar
   useEffect(() => {
     const savedKey = localStorage.getItem('scard_saved_access_key');
     if (savedKey && VALID_ACCESS_KEYS.includes(savedKey)) {
-      // Verifica se a chave salva pertence a este HWID
       if (keyRegistrations[savedKey] && keyRegistrations[savedKey] !== deviceHwid) {
         localStorage.removeItem('scard_saved_access_key');
         return;
@@ -306,15 +304,11 @@ const App = () => {
 
   const handleVerifyAccessKey = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!rememberKey) return; 
-
     setIsValidating(true);
     const trimmedKey = accessKeyInput.trim();
 
-    // Simulação de delay para validação e persistência do HWID
     setTimeout(() => {
       if (VALID_ACCESS_KEYS.includes(trimmedKey)) {
-        // Lógica de Trava de Hardware (Cross-Machine Prevention)
         const registeredHwid = keyRegistrations[trimmedKey];
         
         if (registeredHwid && registeredHwid !== deviceHwid) {
@@ -324,7 +318,6 @@ const App = () => {
           return;
         }
 
-        // Registrar chave para este HWID se for o primeiro uso
         if (!registeredHwid) {
           setKeyRegistrations(prev => ({ ...prev, [trimmedKey]: deviceHwid }));
         }
@@ -514,7 +507,6 @@ const App = () => {
     }
   };
 
-  // TELA DE PROTEÇÃO POR CHAVE DE ACESSO
   if (!isUnlocked) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#020617] p-6 font-sans text-white overflow-hidden relative">
@@ -577,7 +569,6 @@ const App = () => {
     );
   }
 
-  // TELA DE LOGIN/REGISTRO (Pós validação de chave)
   if (!user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-6 font-sans text-slate-900 overflow-hidden relative">
@@ -641,8 +632,6 @@ const App = () => {
   const isCashOpen = cashSession && cashSession.isOpen;
 
   const hasPermission = (viewId: string) => {
-    // Permission system: Admin has all access. Certain views are always allowed for everyone.
-    // 'fiado' is removed from the "always true" list to satisfy the user request.
     if (isAdmin || viewId === 'sales' || viewId === 'reports' || viewId === 'product_search') return true; 
     return (settings.sellerPermissions || []).includes(viewId);
   };
@@ -872,7 +861,6 @@ const FiadoManagementView = ({ user, fiados, setFiados, cashSession, setCashSess
 
     setFiados(updatedFiados);
 
-    // Lógica de Entrada de Caixa se for Dinheiro/Pix
     if (cashSession && (receiveMethod === 'Dinheiro' || receiveMethod === 'Pix')) {
        const newLog: CashLog = {
           id: Math.random().toString(36).substr(2, 9),
@@ -970,8 +958,8 @@ const FiadoManagementView = ({ user, fiados, setFiados, cashSession, setCashSess
        </div>
 
        {receivingModal && (
-          <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[200] backdrop-blur-md animate-in fade-in">
-             <form onSubmit={handleReceive} className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6">
+          <div className="fixed inset-0 flex items-center justify-center p-6 z-[200] animate-in fade-in">
+             <form onSubmit={handleReceive} className="bg-white p-8 rounded-[2.5rem] w-full max-w-sm shadow-2xl space-y-6">
                 <div className="flex justify-between items-center border-b pb-4">
                    <h3 className="text-xl font-black text-slate-900 uppercase italic">Baixa de Pagamento</h3>
                    <button type="button" onClick={() => setReceivingModal(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button>
@@ -1127,13 +1115,8 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
   const [modal, setModal] = useState(false);
   const [prodSearch, setProdSearch] = useState('');
   const [form, setForm] = useState<Partial<Campaign>>({
-    name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: []
+    name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: []
   });
-
-  const availableCategories = useMemo(() => {
-    const cats = new Set(products.map(p => p.category || 'Sem Categoria'));
-    return Array.from(cats).sort();
-  }, [products]);
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1148,7 +1131,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
     else setCampaigns((prev: Campaign[]) => [...prev, c]);
     
     setModal(false);
-    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] });
+    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: [] });
   };
 
   const filteredProds = products.filter(p => p.active && (p.name.toLowerCase().includes(prodSearch.toLowerCase()) || p.sku.toLowerCase().includes(prodSearch.toLowerCase())));
@@ -1162,19 +1145,6 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
     }
   };
 
-  const toggleCategory = (cat: string) => {
-    const productsInCat = products.filter(p => (p.category || 'Sem Categoria') === cat).map(p => p.id);
-    const currentIds = form.productIds || [];
-    const allSelected = productsInCat.length > 0 && productsInCat.every(id => currentIds.includes(id));
-    
-    if (allSelected) {
-      setForm({ ...form, productIds: currentIds.filter(id => !productsInCat.includes(id)) });
-    } else {
-      const newIds = Array.from(new Set([...currentIds, ...productsInCat]));
-      setForm({ ...form, productIds: newIds });
-    }
-  };
-
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0 animate-in fade-in">
       <div className="flex justify-between items-center shrink-0">
@@ -1182,7 +1152,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
           <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Campanhas</h2>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gestão de promoções e eventos</p>
         </div>
-        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, fixedPrice: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
+        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
           <Plus size={16} /> Nova Campanha
         </button>
       </div>
@@ -1218,10 +1188,12 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                        <span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-[10px] font-black border border-indigo-100 uppercase flex items-center gap-1.5 w-fit">
                           <TicketPercent size={12} /> PAGUE {c.pagueX} LEVE {c.leveY}
                        </span>
-                     ) : c.type === 'single_price' ? (
-                        <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-[10px] font-black border border-emerald-100 uppercase flex items-center gap-1.5 w-fit">
-                          <Tag size={12} /> R$ {formatCurrency(c.fixedPrice || 0)}
-                        </span>
+                     ) : c.type === 'bundle' ? (
+                        <div className="flex flex-col gap-1">
+                            <span className="bg-purple-50 text-purple-600 px-3 py-1 rounded-full text-[10px] font-black border border-purple-100 uppercase flex items-center gap-1.5 w-fit">
+                                <Package size={12} /> {c.bundleQuantity} POR R$ {formatCurrency(c.bundlePrice || 0)}
+                            </span>
+                        </div>
                      ) : (
                         <div className="flex flex-col gap-1">
                             <span className="bg-amber-50 text-amber-600 px-3 py-1 rounded-full text-[10px] font-black border border-amber-100 uppercase flex items-center gap-1.5 w-fit">
@@ -1277,7 +1249,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
 
       {modal && (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in">
-          <form onSubmit={save} className="bg-white p-8 rounded-[2.5rem] w-full max-w-4xl shadow-2xl space-y-6 max-h-[90vh] overflow-hidden flex flex-col relative z-20">
+          <form onSubmit={save} className="bg-white p-8 rounded-[2.5rem] w-full max-w-3xl shadow-2xl space-y-6 max-h-[90vh] overflow-hidden flex flex-col relative z-20">
             <div className="flex justify-between items-center border-b pb-4 shrink-0">
                <h3 className="text-xl font-black text-slate-900 uppercase italic">
                   {form.id ? 'Ajustar' : 'Nova'} Campanha / Voucher
@@ -1286,7 +1258,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll pr-2 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="space-y-1">
                       <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Nome da Campanha</label>
@@ -1301,7 +1273,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                         <select className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold uppercase focus:border-indigo-500 outline-none" value={form.type} onChange={e => setForm({ ...form, type: e.target.value as any })}>
                            <option value="percentage">Desconto Percentual (%)</option>
                            <option value="buy_x_get_y">Pague X, Leve Y (Item Grátis)</option>
-                           <option value="single_price">Preço Único (R$ Fixo)</option>
+                           <option value="bundle">Combo / Bundle (Ex: 3 por 100)</option>
                            <option value="voucher">Cupom de Desconto (Voucher)</option>
                         </select>
                     </div>
@@ -1325,41 +1297,26 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                        </div>
                     )}
 
-                    {form.type === 'single_price' && (
-                       <div className="space-y-1">
-                          <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Preço Fixo da Campanha (R$)</label>
-                          <div className="relative">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-300">R$</span>
-                            <input 
-                              type="text" 
-                              className="w-full border-2 rounded-xl pl-12 pr-4 py-2.5 text-sm font-black text-emerald-600 focus:border-emerald-300 outline-none" 
-                              value={formatCurrency(form.fixedPrice || 0)} 
-                              onFocus={(e) => e.target.select()}
-                              onChange={e => setForm(prev => ({ ...prev, fixedPrice: parseCurrency(e.target.value) }))} 
-                              required 
-                            />
-                          </div>
-                       </div>
-                    )}
-
                     {form.type === 'buy_x_get_y' && (
                        <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-1">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Pague (Qtd)</label>
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Pague (Qtd)</label>
                             <input 
                               type="number" 
-                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-indigo-600 focus:border-indigo-300 outline-none" 
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-indigo-600 focus:border-indigo-300 outline-none bg-slate-50" 
                               value={form.pagueX} 
+                              onFocus={(e) => e.target.select()}
                               onChange={e => setForm(prev => ({ ...prev, pagueX: Number(e.target.value) }))} 
                               required 
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Leve (Qtd)</label>
+                            <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Leve (Qtd)</label>
                             <input 
                               type="number" 
-                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-green-600 focus:border-green-300 outline-none" 
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-green-600 focus:border-green-300 outline-none bg-slate-50" 
                               value={form.leveY} 
+                              onFocus={(e) => e.target.select()}
                               onChange={e => setForm(prev => ({ ...prev, leveY: Number(e.target.value) }))} 
                               required 
                             />
@@ -1367,6 +1324,32 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                           <p className="col-span-2 text-[8px] font-bold text-slate-400 italic uppercase">
                              O sistema dará desconto de 100% nas {(form.leveY || 0) - (form.pagueX || 0)} unidades mais baratas a cada {form.leveY} itens.
                           </p>
+                       </div>
+                    )}
+
+                    {form.type === 'bundle' && (
+                       <div className="grid grid-cols-2 gap-4 bg-purple-50 p-4 rounded-2xl border border-purple-100">
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black text-purple-600 uppercase block ml-1">Qtd Itens</label>
+                            <input 
+                              type="number" 
+                              min="1"
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-purple-700 focus:border-purple-300 outline-none" 
+                              value={form.bundleQuantity} 
+                              onChange={e => setForm(prev => ({ ...prev, bundleQuantity: Number(e.target.value) }))} 
+                              required 
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[9px] font-black text-purple-600 uppercase block ml-1">Preço do Combo (R$)</label>
+                            <input 
+                              type="text" 
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-purple-700 focus:border-purple-300 outline-none" 
+                              value={formatCurrency(form.bundlePrice || 0)} 
+                              onChange={e => setForm(prev => ({ ...prev, bundlePrice: parseCurrency(e.target.value) }))} 
+                              required 
+                            />
+                          </div>
                        </div>
                     )}
 
@@ -1414,35 +1397,17 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                   </div>
 
                   <div className="space-y-4 flex flex-col min-h-0">
-                    <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Participantes (Produtos ou Categorias)</label>
-                    <div className="flex flex-wrap gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                      {availableCategories.map(cat => {
-                        const productsInCat = products.filter(p => (p.category || 'Sem Categoria') === cat).map(p => p.id);
-                        const currentIds = form.productIds || [];
-                        const allInCatSelected = productsInCat.length > 0 && productsInCat.every(id => currentIds.includes(id));
-                        return (
-                          <button 
-                            key={cat} 
-                            type="button"
-                            onClick={() => toggleCategory(cat)}
-                            className={`px-3 py-1.5 rounded-lg text-[8px] font-black uppercase transition-all border ${allInCatSelected ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300'}`}
-                          >
-                            {cat}
-                          </button>
-                        );
-                      })}
-                    </div>
-
+                    <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Selecionar Produtos Participantes</label>
                     <div className="relative">
                       <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input type="text" placeholder="Filtrar produtos por nome ou SKU..." className="w-full border-2 rounded-xl pl-9 pr-4 py-2 text-xs font-bold bg-slate-50 outline-none focus:border-indigo-500" value={prodSearch} onChange={e => setProdSearch(e.target.value)} />
+                      <input type="text" placeholder="Buscar produto por nome ou SKU..." className="w-full border-2 rounded-xl pl-9 pr-4 py-2 text-xs font-bold bg-slate-50 outline-none focus:border-indigo-500" value={prodSearch} onChange={e => setProdSearch(e.target.value)} />
                     </div>
-                    <div className="flex-1 border-2 rounded-2xl overflow-y-auto custom-scroll bg-slate-50 p-2 space-y-1 max-h-[250px]">
+                    <div className="flex-1 border-2 rounded-2xl overflow-y-auto custom-scroll bg-slate-50 p-2 space-y-1 max-h-[300px]">
                         {filteredProds.map(p => (
                           <div key={p.id} onClick={() => toggleProduct(p.id)} className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all ${form.productIds?.includes(p.id) ? 'bg-indigo-600 text-white shadow-md' : 'bg-white hover:bg-indigo-50 text-slate-700'}`}>
                              <div className="flex flex-col min-w-0">
                                 <span className="text-[10px] font-black uppercase truncate">{p.name}</span>
-                                <span className={`text-[8px] font-mono ${form.productIds?.includes(p.id) ? 'text-indigo-200' : 'text-slate-400'}`}>SKU: {p.sku} | CAT: {p.category || 'Sem Cat.'}</span>
+                                <span className={`text-[8px] font-mono ${form.productIds?.includes(p.id) ? 'text-indigo-200' : 'text-slate-400'}`}>SKU: {p.sku}</span>
                              </div>
                              {form.productIds?.includes(p.id) ? <CheckCircle2 size={14} /> : <Plus size={14} className="text-slate-300" />}
                           </div>
@@ -1567,21 +1532,60 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       }
     });
 
+    // Lógica para Combos / Bundles (ex: 3 por 100)
+    const activeBundleCampaigns = (campaigns || []).filter((c: Campaign) => {
+      const now = new Date();
+      const start = new Date(c.startDate);
+      const end = new Date(c.endDate);
+      end.setHours(23, 59, 59, 999);
+      return c.type === 'bundle' && now >= start && now <= end;
+    });
+
+    activeBundleCampaigns.forEach((camp: Campaign) => {
+      const qualifyingItems = newCart.filter(item => camp.productIds.includes(item.productId));
+      const totalQty = qualifyingItems.reduce((acc, item) => acc + item.quantity, 0);
+      const bundleQty = camp.bundleQuantity || 1;
+
+      if (totalQty >= bundleQty) {
+        const setsCount = Math.floor(totalQty / bundleQty);
+        const targetPricePerSet = camp.bundlePrice || 0;
+        
+        // Coleta todas as unidades individuais para aplicar o desconto
+        let allUnits: { cartId: string, price: number }[] = [];
+        qualifyingItems.forEach(item => {
+          for(let k = 0; k < item.quantity; k++) {
+            allUnits.push({ cartId: item.cartId, price: item.price });
+          }
+        });
+
+        // Ordenamos para priorizar as mais caras no combo (beneficiando o cliente)
+        allUnits.sort((a, b) => b.price - a.price);
+
+        const unitsInBundles = allUnits.slice(0, setsCount * bundleQty);
+        const originalBundlesTotal = unitsInBundles.reduce((acc, u) => acc + u.price, 0);
+        const targetBundlesTotal = setsCount * targetPricePerSet;
+        const totalDiscountToApply = Math.max(0, originalBundlesTotal - targetBundlesTotal);
+
+        // Distribuímos o desconto proporcionalmente entre as unidades participantes do combo
+        unitsInBundles.forEach(unit => {
+          const cartIdx = newCart.findIndex(it => it.cartId === unit.cartId);
+          if (cartIdx !== -1) {
+            const proportionalDiscount = totalDiscountToApply / unitsInBundles.length;
+            newCart[cartIdx].discountValue += proportionalDiscount;
+            newCart[cartIdx].campaignName = camp.name;
+            newCart[cartIdx].campaignType = 'bundle';
+          }
+        });
+      }
+    });
+
+    // Desconto percentual padrão
     newCart = newCart.map(item => {
       if (item.campaignType) return item; 
       const camp = getQualifyingCampaign(item.productId);
-      if (camp) {
-        if (camp.type === 'single_price') {
-           const fixed = camp.fixedPrice || item.price;
-           const diff = Math.max(0, item.price - fixed);
-           if (diff > 0) {
-              return { ...item, discountValue: diff * item.quantity, campaignName: camp.name, campaignType: 'single_price' };
-           }
-        }
-        if (camp.type === 'percentage') {
-          const disc = (item.price * item.quantity) * (camp.discountPercent / 100);
-          return { ...item, discountValue: disc, campaignName: camp.name, campaignType: 'percentage' };
-        }
+      if (camp && camp.type === 'percentage') {
+        const disc = (item.price * item.quantity) * (camp.discountPercent / 100);
+        return { ...item, discountValue: disc, campaignName: camp.name, campaignType: 'percentage' };
       }
       return item;
     });
@@ -1606,7 +1610,10 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       size: p.size,
       color: p.color,
       discountValue: 0,
-      manualDiscountValue: 0
+      manualDiscountValue: 0,
+      manualDiscountInput: 0,
+      manualDiscountType: 'value',
+      discountBlocked: p.discountBlocked || false
     };
 
     const updatedCart = applyAutomaticCampaigns([...cart, newItem]);
@@ -1658,13 +1665,18 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
   const globalDiscountValue = useMemo(() => {
     const inputVal = Number(discountInput) || 0;
     const limit = isAdmin ? 100 : settings.maxGlobalDiscount;
+    
+    // Calcula subtotal apenas de itens que aceitam desconto global
+    const itemsAllowingGlobal = cart.filter(it => !it.discountBlocked);
+    const subtotalGlobal = itemsAllowingGlobal.reduce((acc, i) => acc + (i.price * i.quantity) - i.discountValue - i.manualDiscountValue, 0);
+
     if (discountType === 'percent') {
       const clampedPercent = Math.min(inputVal, limit);
-      return subtotal * (clampedPercent / 100);
+      return subtotalGlobal * (clampedPercent / 100);
     }
-    const clampedValue = Math.min(inputVal, subtotal * (limit / 100));
+    const clampedValue = Math.min(inputVal, subtotalGlobal * (limit / 100));
     return clampedValue;
-  }, [subtotal, discountInput, discountType, settings.maxGlobalDiscount, isAdmin]);
+  }, [cart, discountInput, discountType, settings.maxGlobalDiscount, isAdmin]);
 
   const totalCartBeforeCredit = Math.max(0, subtotal - globalDiscountValue);
   const creditToUse = Math.min(totalCartBeforeCredit, exchangeCredit);
@@ -1711,7 +1723,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
     };
     setSales((prev: any) => [sale, ...prev]);
 
-    // Lógica para registrar o registro de pagamento (F12)
     const f12Payments = appliedPayments.filter(p => p.method === 'F12');
     if (f12Payments.length > 0) {
        const newFiados: FiadoRecord[] = f12Payments.map(p => ({
@@ -1730,19 +1741,16 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
        setFiados((prev: FiadoRecord[]) => [...newFiados, ...prev]);
     }
 
-    // Atualizar Estoque
     setProducts(products.map((p: Product) => {
       const items = cart.filter(i => i.productId === p.id);
       const totalQty = items.reduce((acc, i) => acc + i.quantity, 0);
       return totalQty > 0 ? { ...p, stock: p.stock - totalQty } : p;
     }));
 
-    // Registrar Movimentações
     setMovements((prev: any) => [...cart.map(i => ({
       id: Math.random(), productId: i.productId, productName: i.name, type: 'saida', quantity: i.quantity, reason: 'Venda PDV', date: new Date().toISOString(), user: assignedVendedor
     })), ...prev]);
 
-    // Atualizar Uso de Vouchers
     const voucherPayments = appliedPayments.filter(p => (p.method === 'Voucher' || p.method === 'Voucher VIP') && p.voucherCode);
     if (voucherPayments.length > 0) {
         setCampaigns((prev: Campaign[]) => prev.map(c => {
@@ -1773,7 +1781,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       }
     }
     
-    // Abrir modal de ticket e limpar carrinho
     setReceiptData(sale);
     setCart([]); 
     setAppliedPayments([]); 
@@ -1807,7 +1814,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
         return;
     }
 
-    // Voucher Válido!
     const valueToApply = Math.min(remainingBalanceToSettle, voucher.voucherValue || 0);
     setCurrentPayAmount(valueToApply);
     alert(`Voucher "${voucher.name}" validado! R$ ${formatCurrency(valueToApply)} pronto para lançar.`);
@@ -1839,7 +1845,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
     if (currentPayMethod === 'C. Débito') net = currentPayAmount * (1 - settings.cardFees.debit / 100);
     else if (currentPayMethod === 'C. Crédito') net = currentPayAmount * (1 - settings.cardFees.credit1x / 100);
     else if (currentPayMethod === 'C. Parcelado') net = currentPayAmount * (1 - settings.cardFees.creditInstallments / 100);
-    else if (currentPayMethod === 'F12') net = 0; // Faturamento postergado
+    else if (currentPayMethod === 'F12') net = 0; 
     
     setAppliedPayments([...appliedPayments, { 
       method: currentPayMethod, 
@@ -1853,7 +1859,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       f12DueDate: currentPayMethod === 'F12' ? f12Date : undefined
     }]);
 
-    // Limpar campos F12
     setF12Client('');
     setF12Desc('');
     setF12Date('');
@@ -1977,8 +1982,13 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                             )}
                           </div>
                           {item.campaignName && (
-                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : item.campaignType === 'single_price' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : item.campaignType === 'percentage' ? 'Promo' : item.campaignType === 'single_price' ? 'Preço Fixo' : 'Cupom'}: {item.campaignName}
+                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : item.campaignType === 'bundle' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : item.campaignType === 'percentage' ? 'Promo' : item.campaignType === 'bundle' ? 'Combo' : 'Cupom'}: {item.campaignName}
+                            </span>
+                          )}
+                          {item.discountBlocked && (
+                            <span className="text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase bg-slate-900 text-white shadow-sm flex items-center gap-1">
+                               <ShieldAlert size={8} /> Desconto Bloqueado
                             </span>
                           )}
                         </div>
@@ -1997,24 +2007,65 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                          </span>
                       </td>
                       <td className="px-4 py-2 text-center">
-                        <div className="relative w-20 mx-auto">
-                          <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[8px] font-black text-slate-300">R$</span>
-                          <input 
-                            type="text"
-                            className="w-full border rounded px-5 py-1 text-[10px] font-black font-mono text-center outline-none focus:border-red-400 bg-slate-50/50"
-                            value={formatCurrency(item.manualDiscountValue || 0)}
-                            onChange={(e) => {
-                              const val = parseCurrency(e.target.value);
-                              // Regra de política de desconto por item
-                              const maxPercent = isAdmin ? 100 : settings.maxGlobalDiscount;
-                              const itemTotalBase = (item.price * item.quantity) - item.discountValue;
-                              const maxDiscountVal = itemTotalBase * (maxPercent / 100);
-                              const clampedVal = Math.min(val, maxDiscountVal);
-                              
-                              setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountValue: clampedVal } : it));
-                            }}
-                            onFocus={(e) => e.target.select()}
-                          />
+                        <div className="flex flex-col items-center gap-1">
+                          <div className={`relative w-28 mx-auto flex items-center bg-slate-50 border rounded-lg transition-all ${item.discountBlocked ? 'opacity-30 pointer-events-none' : 'focus-within:border-red-400'}`}>
+                            <div className="flex bg-slate-100 rounded-l-lg border-r overflow-hidden h-full">
+                               <button 
+                                 type="button" 
+                                 onClick={() => {
+                                   setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountType: 'percent', manualDiscountValue: 0, manualDiscountInput: 0 } : it));
+                                 }} 
+                                 className={`px-2 py-1 flex items-center justify-center ${item.manualDiscountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                               >
+                                 <Percent size={10} />
+                               </button>
+                               <button 
+                                 type="button" 
+                                 onClick={() => {
+                                   setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountType: 'value', manualDiscountValue: 0, manualDiscountInput: 0 } : it));
+                                 }} 
+                                 className={`px-2 py-1 flex items-center justify-center ${item.manualDiscountType === 'value' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                               >
+                                 <DollarSign size={10} />
+                               </button>
+                            </div>
+                            <input 
+                              type="text"
+                              disabled={item.discountBlocked}
+                              className="w-full px-2 py-1 text-[10px] font-black font-mono text-center outline-none bg-transparent"
+                              placeholder="0"
+                              value={item.manualDiscountType === 'value' ? formatCurrency(item.manualDiscountInput || 0) : (item.manualDiscountInput || 0)}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                let val = 0;
+                                if (item.manualDiscountType === 'value') {
+                                  val = parseCurrency(raw);
+                                } else {
+                                  val = Number(raw.replace(/\D/g, '')) || 0;
+                                }
+
+                                const maxPercent = isAdmin ? 100 : settings.maxGlobalDiscount;
+                                const itemTotalBase = (item.price * item.quantity) - item.discountValue;
+                                
+                                let absoluteDiscountValue = 0;
+                                let clampedInput = val;
+
+                                if (item.manualDiscountType === 'percent') {
+                                   const clampedPercent = Math.min(val, maxPercent);
+                                   clampedInput = clampedPercent;
+                                   absoluteDiscountValue = itemTotalBase * (clampedPercent / 100);
+                                } else {
+                                   const maxDiscountVal = itemTotalBase * (maxPercent / 100);
+                                   const clampedVal = Math.min(val, maxDiscountVal);
+                                   clampedInput = clampedVal;
+                                   absoluteDiscountValue = clampedVal;
+                                }
+                                
+                                setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountInput: clampedInput, manualDiscountValue: absoluteDiscountValue } : it));
+                              }}
+                              onFocus={(e) => e.target.select()}
+                            />
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-2 text-right"><span className="font-black text-slate-900 font-mono text-[11px]">R$ {formatCurrency((item.price * item.quantity) - item.discountValue - item.manualDiscountValue)}</span></td>
@@ -2220,9 +2271,8 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
         </div>
       </div>
 
-      {/* MODAL DE TICKET / CONFIRMAÇÃO */}
       {receiptData && (
-        <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-6 z-[150] backdrop-blur-sm animate-in fade-in no-print-overlay">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[150] animate-in fade-in no-print-overlay">
           <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
              <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-green-50 text-green-600 rounded-full mx-auto flex items-center justify-center border border-green-100">
@@ -2327,7 +2377,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       )}
 
       {authRequest && (
-        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[120] backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[120] animate-in fade-in">
           <div className="bg-white p-8 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-6">
             <div className="text-center space-y-2">
               <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl mx-auto flex items-center justify-center border border-amber-100"><ShieldAlert size={32} /></div>
@@ -2347,7 +2397,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       )}
 
       {modalFluxo && (
-        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[110] backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[110] animate-in fade-in">
           <form onSubmit={(e) => {
              e.preventDefault();
              if (fluxoVal <= 0) return alert('Valor inválido!');
@@ -2402,7 +2452,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
 
 const StockManagementView = ({ products, setProducts, categories }: any) => {
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState<any>({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '' });
+  const [form, setForm] = useState<any>({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '', discountBlocked: false });
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('Todas');
 
@@ -2436,10 +2486,10 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
     e.preventDefault();
     if (products.some((p: Product) => p.sku === form.sku && p.id !== form.id)) return alert('SKU duplicado!');
     const id = form.id || Date.now();
-    const p = { ...form, id, active: true, price: Number(form.price) || 0, cost: Number(form.cost) || 0, markup: Number(form.markup) || 1, stock: Number(form.stock) || 0 };
+    const p = { ...form, id, active: true, price: Number(form.price) || 0, cost: Number(form.cost) || 0, markup: Number(form.markup) || 1, stock: Number(form.stock) || 0, discountBlocked: !!form.discountBlocked };
     if (form.id) setProducts((prev: any) => prev.map((x: any) => x.id === id ? p : x));
     else setProducts((prev: any) => [...prev, p]);
-    setModal(false); setForm({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '' });
+    setModal(false); setForm({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '', discountBlocked: false });
   };
   const filteredProducts = useMemo(() => {
     const t = search.toLowerCase();
@@ -2457,13 +2507,13 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
             <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Estoque</h2>
             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Controle de mercadorias</p>
             </div>
-            <button type="button" onClick={() => { setForm({stock: 0, cost: 0, price: 0, markup: 2.0, size: '', color: '', sku: '', category: 'Sem Categoria'}); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase"><Plus size={16}/> Novo Cadastro</button>
+            <button type="button" onClick={() => { setForm({stock: 0, cost: 0, price: 0, markup: 2.0, size: '', color: '', sku: '', category: 'Sem Categoria', discountBlocked: false}); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase"><Plus size={16}/> Novo Cadastro</button>
         </div>
       )}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0">
         <div className="relative group flex-1">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="SKU ou nome..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input type="text" placeholder="SKU or name..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <select className="bg-slate-50 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase outline-none" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
                <option value="Todas">Categorias</option>
@@ -2490,6 +2540,7 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
                     <div className="flex flex-col">
                       <span className="font-bold text-slate-800 text-xs">{p.name}</span>
                       <span className="text-[8px] font-black text-indigo-400 font-mono">{p.sku}</span>
+                      {p.discountBlocked && <span className="text-[7px] text-red-500 font-black uppercase mt-0.5">Sem Desconto</span>}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -2520,7 +2571,7 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
         </div>
       </div>
       {modal && (
-        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in">
           <form onSubmit={save} className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll">
             <h3 className="text-xl font-black text-slate-900 uppercase italic border-b pb-4">{form.id ? 'Ajustar' : 'Novo'} Registro de Peça</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
@@ -2533,7 +2584,26 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
                 <div><label className="text-[9px] font-black text-indigo-400 uppercase block mb-1">Markup</label><input type="number" step="0.1" onFocus={(e) => e.target.select()} className="w-full border-2 border-indigo-100 rounded-xl px-3 py-2 text-sm font-black text-indigo-700" value={form.markup || 0} onChange={e => updatePrice(form.cost, Number(e.target.value))} /></div>
                 <div><label className="text-[9px] font-black text-green-600 uppercase block mb-1">Venda (R$)</label><div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300">R$</span><input type="text" onFocus={(e) => e.target.select()} className="w-full border-2 border-green-100 rounded-xl pl-7 pr-3 py-2 text-sm font-black text-green-700" value={formatCurrency(form.price || 0)} onChange={e => updateMarkup(form.cost, parseCurrency(e.target.value))} /></div></div>
               </div>
-              <div><label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Qtd em Estoque</label><input type="number" onFocus={(e) => e.target.select()} className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-center" value={form.stock || 0} onChange={e => setForm({...form, stock: Number(e.target.value)})} /></div>
+              <div className="md:col-span-2 flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Qtd em Estoque</label>
+                  <input type="number" onFocus={(e) => e.target.select()} className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-center" value={form.stock || 0} onChange={e => setForm({...form, stock: Number(e.target.value)})} />
+                </div>
+                <div className="pt-5">
+                   <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-2xl border border-dashed border-red-200 cursor-pointer hover:bg-red-50 transition-all">
+                      <input 
+                        type="checkbox" 
+                        className="w-5 h-5 rounded-lg text-red-600 accent-red-600" 
+                        checked={form.discountBlocked} 
+                        onChange={e => setForm({...form, discountBlocked: e.target.checked})} 
+                      />
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-red-600 uppercase leading-none">Bloquear Desconto</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase mt-1">Item com preço fixo no caixa</span>
+                      </div>
+                   </label>
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-3 pt-6 border-t mt-4"><button type="button" onClick={() => setModal(false)} className="px-5 py-2 text-slate-400 font-black uppercase text-[10px] tracking-widest">DESCARTAR</button><button type="submit" className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl hover:bg-indigo-700 active:scale-95">SALVAR ALTERAÇÕES</button></div>
           </form>
@@ -2550,6 +2620,9 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
   const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0, 10));
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
+  
+  const [commFilterMonth, setCommFilterMonth] = useState(new Date().toISOString().slice(0, 7));
+  
   const [commBase, setCommBase] = useState(() => Number(localStorage.getItem('dash_comm_base')) || 1);
   const [commPremium, setCommPremium] = useState(() => Number(localStorage.getItem('dash_comm_prem')) || 2);
   const [commThreshold, setCommThreshold] = useState(() => Number(localStorage.getItem('dash_comm_thresh')) || 20000);
@@ -2584,7 +2657,6 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
     filteredSales.forEach((s: Sale) => {
       totals.count += 1;
       s.payments.forEach(p => {
-        // Apenas soma ao faturamento bruto o que NÃO for F12
         if (p.method !== 'F12') {
            totals.total += p.amount;
            if (p.method === 'Dinheiro') totals.cash += p.amount; 
@@ -2602,7 +2674,6 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
       });
     });
 
-    // Adicionar recebimentos de registros pendentes feitos no período
     const allLogs = [
       ...(cashSession?.logs || []),
       ...(cashHistory?.flatMap((h: any) => h.logs) || [])
@@ -2636,8 +2707,9 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
   const commissionContext = useMemo(() => {
     let sellersMap: Record<string, number> = {};
     let totalMonthly = 0;
-    let y, m;
-    if (period === 'day') { [y, m] = selectedDay.split('-').map(Number); } else if (period === 'month') { [y, m] = selectedMonth.split('-').map(Number); } else { y = Number(selectedYear); m = Number(selectedMonth.split('-')[1]); }
+    
+    const [y, m] = commFilterMonth.split('-').map(Number);
+    
     sales.forEach((s: Sale) => {
       const sd = new Date(s.date);
       if (sd.getFullYear() === y && (sd.getMonth() + 1) === m) {
@@ -2647,11 +2719,12 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
       }
     });
     return { sellers: Object.entries(sellersMap).sort((a, b) => b[1] - a[1]), total: totalMonthly };
-  }, [sales, period, selectedDay, selectedMonth, selectedYear]);
+  }, [sales, commFilterMonth]);
 
   const totalReceivedForBadges = stats.totals.cash + stats.totals.pix + stats.totals.card + stats.totals.voucher + stats.totals.voucherVip;
   const totalStock = products.reduce((acc: number, p: any) => acc + p.stock, 0);
   const totalStockCost = products.reduce((acc: number, p: any) => acc + (p.cost * p.stock), 0);
+  const totalStockSaleValue = products.reduce((acc: number, p: any) => acc + (p.price * p.stock), 0);
   const totalFiadoPending = fiados.filter((f: FiadoRecord) => f.status === 'pending').reduce((acc: number, f: FiadoRecord) => acc + f.remainingAmount, 0);
   
   return (
@@ -2675,7 +2748,12 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
         <CardStat icon={<TrendingUp size={24}/>} label="Faturamento Real" val={`R$ ${stats.totals.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`} color="green" />
         <CardStat icon={<Wallet size={24}/>} label="Caixa Atual" val={`R$ ${cashSession?.currentBalance?.toFixed(2) || '0.00'}`} color="indigo" />
         <CardStat icon={<HandCoins size={24}/>} label="Pendente (F12)" val={`R$ ${formatCurrency(totalFiadoPending)}`} color="red" />
-        <CardStat icon={<Box size={24}/>} label="Total Estoque" val={`${totalStock} peças`} subVal={`Custo Total R$ ${formatCurrency(totalStockCost)}`} color="blue" />
+        <CardStat icon={<Box size={24}/>} label="Total Estoque" val={`${totalStock} peças`} subVal={
+          <div className="flex flex-col">
+            <span className="text-red-500">Custo Total R$ {formatCurrency(totalStockCost)}</span>
+            <span className="text-emerald-600 mt-0.5">Venda Total R$ {formatCurrency(totalStockSaleValue)}</span>
+          </div>
+        } color="blue" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -2715,7 +2793,18 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
            <div className="relative z-10 flex flex-col">
               <div className="mb-8">
                  <h3 className="text-lg font-black uppercase italic flex items-center gap-2"><Calculator size={20} className="text-indigo-400" /> Equipe & Comissões</h3>
-                 <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 mb-4">Configuração de metas e bonificações</p>
+                 <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-1 mb-2">Configuração de metas e bonificações</p>
+                 
+                 <div className="flex items-center gap-2 mb-4 bg-white/5 p-3 rounded-2xl border border-white/10 group focus-within:border-indigo-500 transition-colors">
+                    <Calendar size={14} className="text-slate-500 group-focus-within:text-indigo-400" />
+                    <input 
+                      type="month" 
+                      value={commFilterMonth} 
+                      onChange={(e) => setCommFilterMonth(e.target.value)}
+                      className="bg-transparent text-[10px] font-black text-indigo-400 outline-none uppercase cursor-pointer flex-1"
+                    />
+                 </div>
+
                  <div className="grid grid-cols-2 gap-2 mb-4">
                     <div className="flex flex-col gap-1 bg-white/5 p-3 rounded-2xl border border-white/10"><span className="text-[8px] font-black text-slate-400 uppercase">Taxa Base %</span><div className="flex items-center gap-1"><input type="number" step="0.5" className="w-full bg-transparent text-sm font-black text-indigo-400 focus:outline-none" value={commBase} onChange={e => setCommBase(Number(e.target.value))} /><Percent size={10} className="text-slate-600"/></div></div>
                     <div className="flex flex-col gap-1 bg-white/5 p-3 rounded-2xl border border-white/10"><span className="text-[8px] font-black text-slate-400 uppercase">Taxa Premium %</span><div className="flex items-center gap-1"><input type="number" step="0.5" className="w-full bg-transparent text-sm font-black text-amber-400 focus:outline-none" value={commPremium} onChange={e => setCommPremium(Number(e.target.value))} /><Percent size={10} className="text-slate-600"/></div></div>
@@ -2748,10 +2837,10 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
 const CardStat = ({ icon, label, val, color, subVal }: any) => (
   <div className="bg-white p-7 rounded-[2.5rem] shadow-sm border border-slate-200 flex items-center gap-5 hover:shadow-xl hover:-translate-y-1 transition-all group">
     <div className={`p-4 rounded-2xl bg-${color}-50 text-${color}-600 group-hover:scale-110 transition-transform`}>{icon}</div>
-    <div>
+    <div className="min-w-0">
       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 opacity-60">{label}</p>
-      <p className="text-2xl font-black text-slate-900 font-mono italic tracking-tighter leading-tight">{val}</p>
-      {subVal && <p className="text-[9px] font-black text-red-500 uppercase mt-1 tracking-tight">{subVal}</p>}
+      <p className="text-2xl font-black text-slate-900 font-mono italic tracking-tighter leading-tight truncate">{val}</p>
+      {subVal && <div className="text-[9px] font-black uppercase mt-1 tracking-tight">{subVal}</div>}
     </div>
   </div>
 );
@@ -2771,7 +2860,7 @@ const PaymentBadge = ({ label, val, color, total, icon }: any) => {
 
 const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, setMovements, cashHistory, cashSession, settings, setExchangeCredit, setCurrentView }: any) => {
   const [tab, setTab] = useState<'sales' | 'cash' | 'fluxo'>('sales'); const [search, setSearch] = useState(''); const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  const [reprintSale, setReprintSale] = useState<Sale | null>(null); // Novo estado para reimpressão
+  const [reprintSale, setReprintSale] = useState<Sale | null>(null); 
   const [period, setPeriod] = useState<'day' | 'month' | 'year'>('day'); const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0, 10)); const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
   const isAdmin = user.role === 'admin' || user.id === 0; const canDelete = isAdmin || (settings.sellerPermissions || []).includes('delete_sale'); const canExchange = isAdmin || (settings.sellerPermissions || []).includes('exchange_sale');
   const hasSubPermission = (permId: string) => isAdmin || (settings.sellerPermissions || []).includes(permId);
@@ -2843,11 +2932,11 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
       {tab === 'sales' && showSalesTab && (<><div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0"><div className="relative group flex-1"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Filtrar por ID, vendedor ou produto..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} /></div></div><div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data/Hora</th><th className="px-6 py-4">ID</th><th className="px-6 py-4">Vendedor</th><th className="px-6 py-4 text-right">Total</th><th className="px-6 py-4 text-center">Itens</th><th className="px-6 py-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredSales.map((s: Sale) => (<tr key={s.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(s.date).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(s.date).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-[10px] font-mono font-black text-indigo-600">#{s.id.toString().slice(-6)}</td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{s.user}</td><td className="px-6 py-4 text-right font-black text-slate-900 font-mono text-xs">R$ {formatCurrency(s.total)}</td><td className="px-6 py-4 text-center"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500">{s.items.length}</span></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setSelectedSale(s)} className="p-2 text-slate-400 hover:text-indigo-600" title="Ver Detalhes"><Eye size={16}/></button>{canDelete && <button onClick={() => handleDeleteSale(s)} className="p-2 text-slate-400 hover:text-red-600" title="Excluir"><Trash2 size={16}/></button>}</div></td></tr>))}{filteredSales.length === 0 && (<tr><td colSpan={6} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma venda encontrada para este período...</td></tr>)}</tbody></table></div></div></>)}
       {tab === 'fluxo' && showFluxoTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data e Hora</th><th className="px-6 py-4">Usuário</th><th className="px-6 py-4">Tipo</th><th className="px-6 py-4">Descrição/Motivo</th><th className="px-6 py-4 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100">{cashLogs.map((log) => (<tr key={log.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(log.time).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(log.time).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase italic tracking-tight">{log.user}</td><td className="px-6 py-4"><span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${log.type === 'entrada' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{log.type === 'entrada' ? 'Entrada' : 'Sangria'}</span></td><td className="px-6 py-4 text-xs font-bold text-slate-500 max-w-xs truncate">{log.description || '-'}</td><td className={`px-6 py-4 text-right font-black font-mono text-xs ${log.type === 'entrada' ? 'text-green-600' : 'text-red-600'}`}>{log.type === 'entrada' ? '+' : '-'} R$ {formatCurrency(log.amount)}</td></tr>))}{cashLogs.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma movimentação de caixa encontrada...</td></tr>)}</tbody></table></div></div>)}
       {tab === 'cash' && showCashTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Abertura / Fechamento</th><th className="px-6 py-4">Usuários</th><th className="px-6 py-4 text-right">Saldo Inicial</th><th className="px-6 py-4 text-right">Saldo Final</th><th className="px-6 py-4 text-center">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredCashHistory.map((h: CashHistoryEntry) => (<tr key={h.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col gap-1"><div className="flex items-center gap-2 text-[10px] font-bold text-green-600"><Clock size={10} /> {new Date(h.openedAt).toLocaleString()}</div><div className="flex items-center gap-2 text-[10px] font-bold text-red-500"><Clock size={10} /> {new Date(h.closedAt).toLocaleString()}</div></div></td><td className="px-6 py-4"><div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase text-slate-400">AB: {h.openedBy}</span><span className="text-[10px] font-black uppercase text-slate-400">FC: {h.closedBy}</span></div></td><td className="px-6 py-4 text-right text-xs font-mono font-bold text-slate-500">R$ {formatCurrency(h.openingBalance)}</td><td className="px-6 py-4 text-right text-xs font-mono font-black text-slate-900">R$ {formatCurrency(h.closingBalance)}</td><td className="px-6 py-4 text-center"><span className="px-3 py-1 bg-slate-100 rounded-full text-[9px] font-black text-slate-400 uppercase">Encerrado</span></td></tr>))}{filteredCashHistory.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhum histórico de caixa encontrado para este período...</td></tr>)}</tbody></table></div></div>)}
-      {selectedSale && (<div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in"><div className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll"><div className="flex justify-between items-center border-b pb-4"><h3 className="text-xl font-black text-slate-900 uppercase italic">Detalhes da Venda #{selectedSale.id.toString().slice(-6)}</h3><div className="flex items-center gap-2"><button onClick={() => setReprintSale(selectedSale)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Reimprimir Cupom"><Printer size={20}/></button><button onClick={() => setSelectedSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button></div></div><div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-2xl border"><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Data / Hora</p><p className="text-xs font-bold text-slate-700">{new Date(selectedSale.date).toLocaleString()}</p></div><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendedor</p><p className="text-xs font-black text-indigo-600 uppercase">{selectedSale.user}</p></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produtos Vendidos</h4><div className="border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 font-black text-slate-500 uppercase text-[9px]"><tr><th className="px-4 py-2">Item</th><th className="px-4 py-2 text-center">Qtd</th><th className="px-4 py-2 text-right">Total</th><th className="px-4 py-2 text-center">Troca</th></tr></thead><tbody className="divide-y">{selectedSale.items.map((it, i) => (<tr key={i} className={`bg-white ${it.isExchanged ? 'opacity-50 grayscale' : ''}`}><td className="px-4 py-3"><div className="flex flex-col"><span className="font-bold">{it.name}</span><span className="text-[9px] text-slate-400 font-mono">{it.sku}</span><span className="text-[8px] text-slate-500 italic mt-0.5 uppercase tracking-tighter">tam: {it.size || '-'} / cor: {it.color || '-'}</span>{it.isExchanged && <span className="text-[7px] font-black text-red-500 uppercase mt-0.5 animate-pulse">Item Trocado</span>}</div></td><td className="px-4 py-3 text-center font-bold">{it.quantity}</td><td className="px-4 py-3 text-right font-mono font-bold text-indigo-600">R$ {formatCurrency((it.price * it.quantity) - it.discountValue - it.manualDiscountValue)}</td><td className="px-4 py-3 text-center">{canExchange && !it.isExchanged && (<button onClick={() => handleItemExchange(selectedSale, it)} className="p-1.5 bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white rounded-lg transition-all shadow-sm" title="Trocar Item"><RotateCcw size={14}/></button>)}</td></tr>))}</tbody></table></div></div><div className="border-t pt-6 flex flex-col items-end gap-2"><div className="flex justify-between w-64 text-xs font-bold text-slate-400"><span>Subtotal</span><span className="font-mono">R$ {formatCurrency(selectedSale.subtotal)}</span></div><div className="flex justify-between w-64 text-xs font-bold text-red-400"><span>Desconto ({selectedSale.discountPercent.toFixed(1)}%)</span><span className="font-mono">- R$ {formatCurrency(selectedSale.discount)}</span></div>{selectedSale.exchangeCreditUsed && selectedSale.exchangeCreditUsed > 0 && (<div className="flex justify-between w-64 text-xs font-bold text-amber-500"><span>Crédito Utilizado</span><span className="font-mono">- R$ {formatCurrency(selectedSale.exchangeCreditUsed)}</span></div>)}<div className="flex justify-between w-64 text-xl font-black text-slate-900 border-t pt-2"><span className="italic uppercase tracking-tighter">Total Pago</span><span className="font-mono">R$ {formatCurrency(selectedSale.total)}</span></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Meios de Pagamento</h4><div className="flex flex-wrap gap-2">{selectedSale.payments.map((p, i) => (<div key={i} className={`bg-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-50 border border-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-100 px-3 py-2 rounded-xl flex flex-col`}><span className={`text-[8px] font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-400 uppercase`}>{p.method} {p.installments ? `${p.installments}x` : ''} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span><span className={`text-xs font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-600 font-mono`}>R$ {formatCurrency(p.amount)}</span></div>))}</div></div></div></div>)}
+      {selectedSale && (<div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in"><div className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll"><div className="flex justify-between items-center border-b pb-4"><h3 className="text-xl font-black text-slate-900 uppercase italic">Detalhes da Venda #{selectedSale.id.toString().slice(-6)}</h3><div className="flex items-center gap-2"><button onClick={() => setReprintSale(selectedSale)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Reimprimir Cupom"><Printer size={20}/></button><button onClick={() => setSelectedSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button></div></div><div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-2xl border"><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Data / Hora</p><p className="text-xs font-bold text-slate-700">{new Date(selectedSale.date).toLocaleString()}</p></div><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendedor</p><p className="text-xs font-black text-indigo-600 uppercase">{selectedSale.user}</p></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produtos Vendidos</h4><div className="border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 font-black text-slate-500 uppercase text-[9px]"><tr><th className="px-4 py-2">Item</th><th className="px-4 py-2 text-center">Qtd</th><th className="px-4 py-2 text-right">Total</th><th className="px-4 py-2 text-center">Troca</th></tr></thead><tbody className="divide-y">{selectedSale.items.map((it, i) => (<tr key={i} className={`bg-white ${it.isExchanged ? 'opacity-50 grayscale' : ''}`}><td className="px-4 py-3"><div className="flex flex-col"><span className="font-bold">{it.name}</span><span className="text-[9px] text-slate-400 font-mono">{it.sku}</span><span className="text-[8px] text-slate-500 italic mt-0.5 uppercase tracking-tighter">tam: {it.size || '-'} / cor: {it.color || '-'}</span>{it.isExchanged && <span className="text-[7px] font-black text-red-500 uppercase mt-0.5 animate-pulse">Item Trocado</span>}</div></td><td className="px-4 py-3 text-center font-bold">{it.quantity}</td><td className="px-4 py-3 text-right font-mono font-bold text-indigo-600">R$ {formatCurrency((it.price * it.quantity) - it.discountValue - it.manualDiscountValue)}</td><td className="px-4 py-3 text-center">{canExchange && !it.isExchanged && (<button onClick={() => handleItemExchange(selectedSale, it)} className="p-1.5 bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white rounded-lg transition-all shadow-sm" title="Trocar Item"><RotateCcw size={14}/></button>)}</td></tr>))}</tbody></table></div></div><div className="border-t pt-6 flex flex-col items-end gap-2"><div className="flex justify-between w-64 text-xs font-bold text-slate-400"><span>Subtotal</span><span className="font-mono">R$ {formatCurrency(selectedSale.subtotal)}</span></div><div className="flex justify-between w-64 text-xs font-bold text-red-400"><span>Desconto ({selectedSale.discountPercent.toFixed(1)}%)</span><span className="font-mono">- R$ {formatCurrency(selectedSale.discount)}</span></div>{selectedSale.exchangeCreditUsed && selectedSale.exchangeCreditUsed > 0 && (<div className="flex justify-between w-64 text-xs font-bold text-amber-500"><span>Crédito Utilizado</span><span className="font-mono">- R$ {formatCurrency(selectedSale.exchangeCreditUsed)}</span></div>)}<div className="flex justify-between w-64 text-xl font-black text-slate-900 border-t pt-2"><span className="italic uppercase tracking-tighter">Total Pago</span><span className="font-mono">R$ {formatCurrency(selectedSale.total)}</span></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Meios de Pagamento</h4><div className="flex flex-wrap gap-2">{selectedSale.payments.map((p, i) => (<div key={i} className={`bg-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-50 border border-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-100 px-3 py-2 rounded-xl flex flex-col`}><span className={`text-[8px] font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-400 uppercase`}>{p.method} {p.installments ? `${p.installments}x` : ''} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span><span className={`text-xs font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-600 font-mono`}>R$ {formatCurrency(p.amount)}</span></div>))}</div></div></div></div>)}
 
       {reprintSale && (
-        <div className="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-6 z-[150] backdrop-blur-sm animate-in fade-in no-print-overlay">
-          <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[150] animate-in fade-in no-print-overlay">
+          <div className="bg-white p-8 rounded-[2rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
              <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full mx-auto flex items-center justify-center border border-indigo-100">
                     <Printer size={32} strokeWidth={3} />
@@ -3016,22 +3105,22 @@ const SettingsViewComponent = ({ settings, setSettings, categories, setCategorie
 const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
   const [editModal, setEditModal] = useState<User | null>(null);
   const [showPass, setShowPass] = useState(false);
+  
+  const [changingPass, setChangingPass] = useState(false);
+  const [currentPassInput, setCurrentPassInput] = useState('');
+  const [newPassInput, setNewPassInput] = useState('');
+
+  const isMaster = currentUser.id === 0 || currentUser.email === 'master@internal';
 
   const handleToggleShowPass = () => {
     if (showPass) {
       setShowPass(false);
       return;
     }
-    const isMaster = currentUser.id === 0 || currentUser.email === 'master@internal';
     if (isMaster) {
       setShowPass(true);
     } else {
-      const confirmPass = window.prompt("Confirme sua senha de administrador para visualizar:");
-      if (confirmPass === currentUser.password) {
-        setShowPass(true);
-      } else if (confirmPass !== null) {
-        alert("Senha incorreta!");
-      }
+      alert("Apenas o usuário MASTER tem permissão para visualizar senhas cadastradas diretamente.");
     }
   };
 
@@ -3043,10 +3132,28 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
   const handleUpdateProfile = (e: React.FormEvent) => { 
     e.preventDefault(); 
     if (!editModal) return; 
-    setUsers(users.map((u: User) => u.id === editModal.id ? editModal : u)); 
+
+    let updatedUser = { ...editModal };
+
+    if (!isMaster && changingPass) {
+      if (currentPassInput !== currentUser.password) {
+        alert("Sua senha atual está incorreta. Autorização negada para alteração.");
+        return;
+      }
+      if (!newPassInput.trim()) {
+        alert("Informe a nova senha desejada.");
+        return;
+      }
+      updatedUser.password = newPassInput;
+    }
+
+    setUsers(users.map((u: User) => u.id === updatedUser.id ? updatedUser : u)); 
     setEditModal(null); 
     setShowPass(false);
-    alert('Perfil atualizado!'); 
+    setChangingPass(false);
+    setCurrentPassInput('');
+    setNewPassInput('');
+    alert('Perfil atualizado com sucesso!'); 
   };
 
   return (
@@ -3067,7 +3174,7 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
               {u.role}
             </span>
             <div className="border-t border-slate-100 mt-6 pt-4 flex justify-center gap-3">
-              <button onClick={() => { setEditModal(u); setShowPass(false); }} className="text-[9px] font-black uppercase text-indigo-600">Editar</button>
+              <button onClick={() => { setEditModal(u); setShowPass(false); setChangingPass(false); }} className="text-[9px] font-black uppercase text-indigo-600">Editar</button>
               {u.id !== currentUser.id && (
                 <button onClick={() => handleDeleteUser(u.id)} className="text-[9px] font-black uppercase text-red-400">Excluir</button>
               )}
@@ -3076,36 +3183,95 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
         ))}
       </div>
       {editModal && (
-        <div className="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-6 z-[100] backdrop-blur-md animate-in fade-in">
-          <form onSubmit={handleUpdateProfile} className="bg-white p-10 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-5">
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in">
+          <form onSubmit={handleUpdateProfile} className="bg-white p-10 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-5 relative">
             <h3 className="text-2xl font-black text-slate-900 uppercase italic">Editar Usuário</h3>
             <div className="space-y-4">
-              <input className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.name} onChange={e => setEditModal({...editModal, name: e.target.value})} required placeholder="Nome" />
-              <input type="email" className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.email} onChange={e => setEditModal({...editModal, email: e.target.value})} required placeholder="E-mail" />
-              <div className="relative">
-                <input 
-                  type={showPass ? "text" : "password"} 
-                  className="w-full border-2 rounded-xl px-4 py-3 text-sm pr-12" 
-                  value={editModal.password || ''} 
-                  onChange={e => setEditModal({...editModal, password: e.target.value})} 
-                  placeholder="Nova Senha" 
-                />
-                <button 
-                  type="button" 
-                  onClick={handleToggleShowPass}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
-                >
-                  <Eye size={18} className={showPass ? "text-indigo-600" : ""} />
-                </button>
+              <div className="space-y-1">
+                <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Nome</label>
+                <input className="w-full border-2 rounded-xl px-4 py-3 text-sm font-bold bg-slate-50/50" value={editModal.name} onChange={e => setEditModal({...editModal, name: e.target.value})} required placeholder="Nome" />
               </div>
-              <select className="w-full border-2 rounded-xl px-4 py-3 text-sm" value={editModal.role} onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}>
-                <option value="atendente">Atendente</option>
-                <option value="admin">Admin</option>
-              </select>
+              <div className="space-y-1">
+                <label className="text-[8px] font-black text-slate-400 uppercase ml-1">E-mail</label>
+                <input type="email" className="w-full border-2 rounded-xl px-4 py-3 text-sm font-bold bg-slate-50/50" value={editModal.email} onChange={e => setEditModal({...editModal, email: e.target.value})} required placeholder="E-mail" />
+              </div>
+
+              {isMaster ? (
+                <div className="space-y-1">
+                   <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Senha (Visível para Master)</label>
+                   <div className="relative">
+                      <input 
+                        type={showPass ? "text" : "password"} 
+                        className="w-full border-2 rounded-xl px-4 py-3 text-sm pr-12 font-bold bg-slate-50" 
+                        value={editModal.password || ''} 
+                        onChange={e => editModal.id === 0 ? null : setEditModal({...editModal, password: e.target.value})} 
+                        placeholder="Senha" 
+                        disabled={editModal.id === 0}
+                      />
+                      <button 
+                        type="button" 
+                        onClick={handleToggleShowPass}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
+                      >
+                        <Eye size={18} className={showPass ? "text-indigo-600" : ""} />
+                      </button>
+                   </div>
+                </div>
+              ) : (
+                <div className="pt-2">
+                   {!changingPass ? (
+                      <button 
+                        type="button"
+                        onClick={() => setChangingPass(true)}
+                        className="w-full py-4 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-500 font-black text-[9px] uppercase hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"
+                      >
+                         <Lock size={12} /> Mudar Senha do Usuário
+                      </button>
+                   ) : (
+                      <div className="space-y-3 animate-in fade-in zoom-in-95 bg-indigo-50/30 p-3 rounded-2xl border border-indigo-100">
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black text-indigo-400 uppercase ml-1">Sua Senha Atual (Confirmar)</label>
+                            <input 
+                              type="password" 
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm bg-white font-bold outline-none focus:border-indigo-400" 
+                              placeholder="••••••"
+                              value={currentPassInput}
+                              onChange={e => setCurrentPassInput(e.target.value)}
+                            />
+                         </div>
+                         <div className="space-y-1">
+                            <label className="text-[8px] font-black text-indigo-400 uppercase ml-1">Nova Senha do Colaborador</label>
+                            <input 
+                              type="password" 
+                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm bg-white font-bold outline-none focus:border-indigo-400" 
+                              placeholder="Nova senha"
+                              value={newPassInput}
+                              onChange={e => setNewPassInput(e.target.value)}
+                            />
+                         </div>
+                         <button 
+                            type="button"
+                            onClick={() => { setChangingPass(false); setCurrentPassInput(''); setNewPassInput(''); }}
+                            className="text-[8px] font-black text-slate-400 uppercase ml-2 hover:text-red-500"
+                          >
+                            Cancelar Mudança
+                          </button>
+                      </div>
+                   )}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Nível de Acesso</label>
+                <select className="w-full border-2 rounded-xl px-4 py-3 text-sm font-bold bg-slate-50/50" value={editModal.role} onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}>
+                  <option value="atendente">Atendente (Vendedor)</option>
+                  <option value="admin">Administrador (Gerente)</option>
+                </select>
+              </div>
             </div>
             <div className="flex justify-end gap-3 pt-6">
-              <button type="button" onClick={() => { setEditModal(null); setShowPass(false); }} className="text-slate-400 font-black uppercase text-[10px]">Cancelar</button>
-              <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black uppercase text-[10px]">Salvar</button>
+              <button type="button" onClick={() => { setEditModal(null); setShowPass(false); setChangingPass(false); }} className="text-slate-400 font-black uppercase text-[10px] px-4">Cancelar</button>
+              <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black uppercase text-[10px] shadow-xl hover:bg-indigo-700 active:scale-95 transition-all">Salvar Perfil</button>
             </div>
           </form>
         </div>
