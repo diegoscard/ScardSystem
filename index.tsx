@@ -118,7 +118,7 @@ interface SaleItem {
   manualDiscountType?: 'value' | 'percent'; // Tipo de desconto do item
   isExchanged?: boolean; 
   campaignName?: string; 
-  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle';
+  campaignType?: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle' | 'fixed_price';
   discountBlocked?: boolean; // Herdado do produto
 }
 
@@ -150,7 +150,7 @@ interface FiadoRecord {
 
 interface CashLog {
   id: string;
-  type: 'entrada' | 'retirada' | 'venda' | 'abertura';
+  type: 'entrada' | 'retirada' | 'venda' | 'abertura' | 'ajuste';
   amount: number;
   description: string;
   time: string;
@@ -203,7 +203,7 @@ interface Campaign {
   id: number;
   name: string;
   description: string;
-  type: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle';
+  type: 'percentage' | 'buy_x_get_y' | 'voucher' | 'bundle' | 'fixed_price';
   discountPercent: number;
   pagueX?: number; 
   leveY?: number;  
@@ -212,6 +212,7 @@ interface Campaign {
   voucherQuantity?: number;
   bundleQuantity?: number; // Qtd para o combo (ex: 3)
   bundlePrice?: number;    // Preço fixo do combo (ex: 100)
+  fixedPriceValue?: number; // Preço fixo por item
   startDate: string;
   endDate: string;
   active: boolean;
@@ -228,7 +229,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     credit1x: 3.49,
     creditInstallments: 4.99
   },
-  sellerPermissions: ['exchange_sale', 'fiado', 'stock', 'dashboard', 'campaigns'],
+  sellerPermissions: ['exchange_sale'],
   storeAddress: 'Rua da Moda, 123 - Centro',
   storeCnpj: '00.000.000/0001-00',
   storeName: 'SCARD SYS',
@@ -791,10 +792,12 @@ const App = () => {
               setMovements={setMovements}
               cashHistory={cashHistory}
               cashSession={cashSession}
+              setCashSession={setCashSession}
               setCashHistory={setCashHistory}
               settings={settings}
               setExchangeCredit={setExchangeCredit}
               setCurrentView={setCurrentView}
+              vendedores={dbUsers}
             />
           )}
           {currentView === 'team' && (
@@ -959,7 +962,7 @@ const FiadoManagementView = ({ user, fiados, setFiados, cashSession, setCashSess
 
        {receivingModal && (
           <div className="fixed inset-0 flex items-center justify-center p-6 z-[200] animate-in fade-in">
-             <form onSubmit={handleReceive} className="bg-white p-8 rounded-[2.5rem] w-full max-w-sm shadow-2xl space-y-6">
+             <form onSubmit={handleReceive} className="bg-white p-8 rounded-[2.5rem] w-full max-sm shadow-2xl space-y-6">
                 <div className="flex justify-between items-center border-b pb-4">
                    <h3 className="text-xl font-black text-slate-900 uppercase italic">Baixa de Pagamento</h3>
                    <button type="button" onClick={() => setReceivingModal(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button>
@@ -1021,6 +1024,8 @@ const FiadoManagementView = ({ user, fiados, setFiados, cashSession, setCashSess
 const ProductSearchViewComponent = ({ products, categories }: { products: Product[], categories: string[] }) => {
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('Todas');
+  const [filterSize, setFilterSize] = useState('');
+  const [filterColor, setFilterColor] = useState('');
 
   const sortedCategories = useMemo(() => { 
     return [...categories].sort((a, b) => { 
@@ -1032,12 +1037,16 @@ const ProductSearchViewComponent = ({ products, categories }: { products: Produc
 
   const filteredProducts = useMemo(() => {
     const t = search.toLowerCase();
+    const s = filterSize.toLowerCase();
+    const c = filterColor.toLowerCase();
     return products.filter((p: Product) => {
       const matchSearch = p.active && (p.name.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t));
       const matchCategory = filterCategory === 'Todas' ? true : p.category === filterCategory;
-      return matchSearch && matchCategory;
+      const matchSize = s ? p.size?.toLowerCase().includes(s) : true;
+      const matchColor = c ? p.color?.toLowerCase().includes(c) : true;
+      return matchSearch && matchCategory && matchSize && matchColor;
     });
-  }, [products, search, filterCategory]);
+  }, [products, search, filterCategory, filterSize, filterColor]);
 
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0 animate-in fade-in">
@@ -1046,15 +1055,45 @@ const ProductSearchViewComponent = ({ products, categories }: { products: Produc
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Verificação rápida de preço e estoque</p>
        </div>
        
-       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0">
-          <div className="relative group flex-1">
-            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input type="text" placeholder="Buscar por SKU ou nome..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 shrink-0">
+          <div className="flex gap-4">
+            <div className="relative group flex-[3]">
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input type="text" placeholder="Buscar por SKU ou nome..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} autoFocus />
+            </div>
+            <select className="flex-1 bg-slate-50 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase outline-none focus:border-indigo-500" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+               <option value="Todas">Todas Categorias</option>
+               {sortedCategories.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
+            </select>
           </div>
-          <select className="bg-slate-50 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase outline-none" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-             <option value="Todas">Categorias</option>
-             {sortedCategories.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
-          </select>
+          
+          <div className="flex gap-6 items-center border-t pt-4">
+            <div className="flex items-center gap-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TAM</label>
+              <input 
+                type="text" 
+                placeholder="Ex: P, M, 42..." 
+                className="w-32 px-3 py-2 bg-slate-50 border rounded-lg text-xs font-bold outline-none focus:border-indigo-500 uppercase"
+                value={filterSize}
+                onChange={e => setFilterSize(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">COR</label>
+              <input 
+                type="text" 
+                placeholder="Ex: Branca, Azul..." 
+                className="w-48 px-3 py-2 bg-slate-50 border rounded-lg text-xs font-bold outline-none focus:border-indigo-500 uppercase"
+                value={filterColor}
+                onChange={e => setFilterColor(e.target.value)}
+              />
+            </div>
+            {(filterSize || filterColor) && (
+              <button onClick={() => { setFilterSize(''); setFilterColor(''); }} className="text-[9px] font-black text-red-400 uppercase hover:text-red-600 transition-colors flex items-center gap-1">
+                <X size={12} /> Limpar Filtros
+              </button>
+            )}
+          </div>
        </div>
 
        <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0">
@@ -1115,7 +1154,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
   const [modal, setModal] = useState(false);
   const [prodSearch, setProdSearch] = useState('');
   const [form, setForm] = useState<Partial<Campaign>>({
-    name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: []
+    name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, fixedPriceValue: 0, startDate: '', endDate: '', active: true, productIds: []
   });
 
   const save = (e: React.FormEvent) => {
@@ -1131,7 +1170,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
     else setCampaigns((prev: Campaign[]) => [...prev, c]);
     
     setModal(false);
-    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: [] });
+    setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, fixedPriceValue: 0, startDate: '', endDate: '', active: true, productIds: [] });
   };
 
   const filteredProds = products.filter(p => p.active && (p.name.toLowerCase().includes(prodSearch.toLowerCase()) || p.sku.toLowerCase().includes(prodSearch.toLowerCase())));
@@ -1152,7 +1191,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
           <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Campanhas</h2>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Gestão de promoções e eventos</p>
         </div>
-        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
+        <button onClick={() => { setForm({ name: '', description: '', type: 'percentage', discountPercent: 0, pagueX: 0, leveY: 0, voucherCode: '', voucherValue: 0, voucherQuantity: 1, bundleQuantity: 1, bundlePrice: 0, fixedPriceValue: 0, startDate: '', endDate: '', active: true, productIds: [] }); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
           <Plus size={16} /> Nova Campanha
         </button>
       </div>
@@ -1194,6 +1233,10 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                                 <Package size={12} /> {c.bundleQuantity} POR R$ {formatCurrency(c.bundlePrice || 0)}
                             </span>
                         </div>
+                     ) : c.type === 'fixed_price' ? (
+                        <span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-[10px] font-black border border-emerald-100 uppercase flex items-center gap-1.5 w-fit">
+                           <Tag size={12} /> PREÇO FIXO: R$ {formatCurrency(c.fixedPriceValue || 0)}
+                        </span>
                      ) : (
                         <div className="flex flex-col gap-1">
                             <span className="bg-amber-50 text-amber-600 px-3 py-1 rounded-full text-[10px] font-black border border-amber-100 uppercase flex items-center gap-1.5 w-fit">
@@ -1272,6 +1315,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                         <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Tipo de Campanha</label>
                         <select className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-bold uppercase focus:border-indigo-500 outline-none" value={form.type} onChange={e => setForm({ ...form, type: e.target.value as any })}>
                            <option value="percentage">Desconto Percentual (%)</option>
+                           <option value="fixed_price">Preço Fixo (R$)</option>
                            <option value="buy_x_get_y">Pague X, Leve Y (Item Grátis)</option>
                            <option value="bundle">Combo / Bundle (Ex: 3 por 100)</option>
                            <option value="voucher">Cupom de Desconto (Voucher)</option>
@@ -1294,6 +1338,24 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                               required 
                             />
                           </div>
+                       </div>
+                    )}
+
+                    {form.type === 'fixed_price' && (
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-black text-slate-400 uppercase block ml-1">Preço Final (R$)</label>
+                          <div className="relative">
+                            <DollarSign size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
+                            <input 
+                              type="text" 
+                              className="w-full border-2 rounded-xl pl-12 pr-4 py-2.5 text-sm font-black text-emerald-600 focus:border-emerald-300 outline-none bg-slate-50" 
+                              value={formatCurrency(form.fixedPriceValue || 0)} 
+                              onFocus={(e) => e.target.select()}
+                              onChange={e => setForm(prev => ({ ...prev, fixedPriceValue: parseCurrency(e.target.value) }))} 
+                              required 
+                            />
+                          </div>
+                          <p className="text-[8px] font-bold text-slate-400 uppercase mt-1 italic">Todos os itens selecionados custarão este valor no caixa.</p>
                        </div>
                     )}
 
@@ -1371,7 +1433,7 @@ const CampaignsViewComponent = ({ campaigns, setCampaigns, products }: { campaig
                                     />
                               </div>
                               <div className="space-y-1">
-                                    <label className="text-[9px] font-black text-amber-600 uppercase block ml-1">Quantidade/Limite</label>
+                                    <label className="text-[9px] font-black text-amber-600 uppercase ml-1">Quantidade/Limite</label>
                                     <input 
                                         type="number" 
                                         className="w-full border-2 rounded-xl px-4 py-2.5 text-sm font-black text-amber-700 outline-none" 
@@ -1532,7 +1594,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       }
     });
 
-    // Lógica para Combos / Bundles (ex: 3 por 100)
     const activeBundleCampaigns = (campaigns || []).filter((c: Campaign) => {
       const now = new Date();
       const start = new Date(c.startDate);
@@ -1550,7 +1611,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
         const setsCount = Math.floor(totalQty / bundleQty);
         const targetPricePerSet = camp.bundlePrice || 0;
         
-        // Coleta todas as unidades individuais para aplicar o desconto
         let allUnits: { cartId: string, price: number }[] = [];
         qualifyingItems.forEach(item => {
           for(let k = 0; k < item.quantity; k++) {
@@ -1558,7 +1618,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
           }
         });
 
-        // Ordenamos para priorizar as mais caras no combo (beneficiando o cliente)
         allUnits.sort((a, b) => b.price - a.price);
 
         const unitsInBundles = allUnits.slice(0, setsCount * bundleQty);
@@ -1566,7 +1625,6 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
         const targetBundlesTotal = setsCount * targetPricePerSet;
         const totalDiscountToApply = Math.max(0, originalBundlesTotal - targetBundlesTotal);
 
-        // Distribuímos o desconto proporcionalmente entre as unidades participantes do combo
         unitsInBundles.forEach(unit => {
           const cartIdx = newCart.findIndex(it => it.cartId === unit.cartId);
           if (cartIdx !== -1) {
@@ -1579,7 +1637,17 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
       }
     });
 
-    // Desconto percentual padrão
+    newCart = newCart.map(item => {
+      if (item.campaignType) return item; 
+      const camp = getQualifyingCampaign(item.productId);
+      if (camp && camp.type === 'fixed_price') {
+        const fixedVal = camp.fixedPriceValue || 0;
+        const disc = Math.max(0, (item.price - fixedVal) * item.quantity);
+        return { ...item, discountValue: disc, campaignName: camp.name, campaignType: 'fixed_price' };
+      }
+      return item;
+    });
+
     newCart = newCart.map(item => {
       if (item.campaignType) return item; 
       const camp = getQualifyingCampaign(item.productId);
@@ -1661,22 +1729,31 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
   const subtotal = useMemo(() => {
     return cart.reduce((acc, i) => acc + (i.price * i.quantity) - i.discountValue - i.manualDiscountValue, 0);
   }, [cart]);
+
+  const totalGrossDiscretionaryBase = useMemo(() => {
+    return cart.filter(it => !it.discountBlocked).reduce((acc, i) => acc + (i.price * i.quantity), 0);
+  }, [cart]);
+
+  const totalManualItemDiscounts = useMemo(() => {
+    return cart.reduce((acc, it) => acc + it.manualDiscountValue, 0);
+  }, [cart]);
   
   const globalDiscountValue = useMemo(() => {
     const inputVal = Number(discountInput) || 0;
-    const limit = isAdmin ? 100 : settings.maxGlobalDiscount;
+    const limitPct = isAdmin ? 100 : settings.maxGlobalDiscount;
     
-    // Calcula subtotal apenas de itens que aceitam desconto global
-    const itemsAllowingGlobal = cart.filter(it => !it.discountBlocked);
-    const subtotalGlobal = itemsAllowingGlobal.reduce((acc, i) => acc + (i.price * i.quantity) - i.discountValue - i.manualDiscountValue, 0);
+    const maxTotalBudget = totalGrossDiscretionaryBase * (limitPct / 100);
+    const availableForGlobal = Math.max(0, maxTotalBudget - totalManualItemDiscounts);
 
+    let requested = 0;
     if (discountType === 'percent') {
-      const clampedPercent = Math.min(inputVal, limit);
-      return subtotalGlobal * (clampedPercent / 100);
+      requested = totalGrossDiscretionaryBase * (inputVal / 100);
+    } else {
+      requested = inputVal;
     }
-    const clampedValue = Math.min(inputVal, subtotalGlobal * (limit / 100));
-    return clampedValue;
-  }, [cart, discountInput, discountType, settings.maxGlobalDiscount, isAdmin]);
+
+    return Math.min(requested, availableForGlobal);
+  }, [cart, discountInput, discountType, settings.maxGlobalDiscount, isAdmin, totalGrossDiscretionaryBase, totalManualItemDiscounts]);
 
   const totalCartBeforeCredit = Math.max(0, subtotal - globalDiscountValue);
   const creditToUse = Math.min(totalCartBeforeCredit, exchangeCredit);
@@ -1982,8 +2059,17 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                             )}
                           </div>
                           {item.campaignName && (
-                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : item.campaignType === 'bundle' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'}`}>
-                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : item.campaignType === 'percentage' ? 'Promo' : item.campaignType === 'bundle' ? 'Combo' : 'Cupom'}: {item.campaignName}
+                            <span className={`text-[7px] font-black px-1.5 py-0.5 rounded-md w-fit mt-1 uppercase italic shadow-sm animate-in zoom-in ${
+                                item.campaignType === 'buy_x_get_y' ? 'bg-indigo-100 text-indigo-700' : 
+                                item.campaignType === 'percentage' ? 'bg-red-100 text-red-600' : 
+                                item.campaignType === 'bundle' ? 'bg-purple-100 text-purple-700' : 
+                                item.campaignType === 'fixed_price' ? 'bg-emerald-100 text-emerald-700' :
+                                'bg-amber-100 text-amber-700'}`}>
+                                {item.campaignType === 'buy_x_get_y' ? 'Promo Leve+' : 
+                                 item.campaignType === 'percentage' ? 'Promo' : 
+                                 item.campaignType === 'bundle' ? 'Combo' : 
+                                 item.campaignType === 'fixed_price' ? 'Preço Fixo' :
+                                 'Cupom'}: {item.campaignName}
                             </span>
                           )}
                           {item.discountBlocked && (
@@ -2008,25 +2094,25 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                       </td>
                       <td className="px-4 py-2 text-center">
                         <div className="flex flex-col items-center gap-1">
-                          <div className={`relative w-28 mx-auto flex items-center bg-slate-50 border rounded-lg transition-all ${item.discountBlocked ? 'opacity-30 pointer-events-none' : 'focus-within:border-red-400'}`}>
-                            <div className="flex bg-slate-100 rounded-l-lg border-r overflow-hidden h-full">
+                          <div className={`relative w-40 mx-auto flex items-center bg-slate-50 border rounded-lg transition-all ${item.discountBlocked ? 'opacity-30 pointer-events-none' : 'focus-within:border-red-400'}`}>
+                            <div className="flex bg-slate-100 rounded-l-lg border-r overflow-hidden h-full shrink-0">
                                <button 
                                  type="button" 
                                  onClick={() => {
                                    setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountType: 'percent', manualDiscountValue: 0, manualDiscountInput: 0 } : it));
                                  }} 
-                                 className={`px-2 py-1 flex items-center justify-center ${item.manualDiscountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                                 className={`w-8 py-1 flex items-center justify-center ${item.manualDiscountType === 'percent' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
                                >
-                                 <Percent size={10} />
+                                 <Percent size={14} />
                                </button>
                                <button 
                                  type="button" 
                                  onClick={() => {
                                    setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountType: 'value', manualDiscountValue: 0, manualDiscountInput: 0 } : it));
                                  }} 
-                                 className={`px-2 py-1 flex items-center justify-center ${item.manualDiscountType === 'value' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
+                                 className={`w-8 py-1 flex items-center justify-center ${item.manualDiscountType === 'value' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-200'}`}
                                >
-                                 <DollarSign size={10} />
+                                 <DollarSign size={14} />
                                </button>
                             </div>
                             <input 
@@ -2044,24 +2130,36 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
                                   val = Number(raw.replace(/\D/g, '')) || 0;
                                 }
 
-                                const maxPercent = isAdmin ? 100 : settings.maxGlobalDiscount;
-                                const itemTotalBase = (item.price * item.quantity) - item.discountValue;
-                                
-                                let absoluteDiscountValue = 0;
-                                let clampedInput = val;
+                                const totalGross = cart.filter(it => !it.discountBlocked).reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                const limitPct = isAdmin ? 100 : settings.maxGlobalDiscount;
+                                const maxTotalBudget = isAdmin ? totalGross : (totalGross * (limitPct / 100));
 
-                                if (item.manualDiscountType === 'percent') {
-                                   const clampedPercent = Math.min(val, maxPercent);
-                                   clampedInput = clampedPercent;
-                                   absoluteDiscountValue = itemTotalBase * (clampedPercent / 100);
-                                } else {
-                                   const maxDiscountVal = itemTotalBase * (maxPercent / 100);
-                                   const clampedVal = Math.min(val, maxDiscountVal);
-                                   clampedInput = clampedVal;
-                                   absoluteDiscountValue = clampedVal;
+                                const otherManualItems = cart.filter(it => it.cartId !== item.cartId).reduce((acc, it) => acc + it.manualDiscountValue, 0);
+                                
+                                let currentGlobalVal = 0;
+                                if (discountType === 'percent') { currentGlobalVal = totalGross * (discountInput / 100); }
+                                else { currentGlobalVal = discountInput; }
+                                currentGlobalVal = Math.min(currentGlobalVal, maxTotalBudget);
+
+                                const budgetRemainingForThisItem = Math.max(0, maxTotalBudget - otherManualItems - currentGlobalVal);
+
+                                const itemGross = item.price * item.quantity;
+                                let absoluteRequested = 0;
+                                if (item.manualDiscountType === 'percent') { absoluteRequested = itemGross * (val / 100); }
+                                else { absoluteRequested = val; }
+
+                                const clampedAbsolute = Math.min(absoluteRequested, budgetRemainingForThisItem, itemGross);
+                                
+                                let clampedInput = val;
+                                if (clampedAbsolute < absoluteRequested) {
+                                   if (item.manualDiscountType === 'percent') {
+                                      clampedInput = itemGross > 0 ? (clampedAbsolute / itemGross) * 100 : 0;
+                                   } else {
+                                      clampedInput = clampedAbsolute;
+                                   }
                                 }
                                 
-                                setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountInput: clampedInput, manualDiscountValue: absoluteDiscountValue } : it));
+                                setCart(prev => prev.map(it => it.cartId === item.cartId ? { ...it, manualDiscountInput: clampedInput, manualDiscountValue: clampedAbsolute } : it));
                               }}
                               onFocus={(e) => e.target.select()}
                             />
@@ -2378,7 +2476,7 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
 
       {authRequest && (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-[120] animate-in fade-in">
-          <div className="bg-white p-8 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-6">
+          <div className="bg-white p-8 rounded-[2rem] w-full max-sm shadow-2xl space-y-6">
             <div className="text-center space-y-2">
               <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl mx-auto flex items-center justify-center border border-amber-100"><ShieldAlert size={32} /></div>
               <h3 className="text-xl font-black text-slate-900 uppercase italic">Autorização Necessária</h3>
@@ -2455,13 +2553,11 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
   const [form, setForm] = useState<any>({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '', discountBlocked: false });
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('Todas');
+  const [filterSize, setFilterSize] = useState('');
+  const [filterColor, setFilterColor] = useState('');
 
   const sortedCategories = useMemo(() => { 
-    return [...categories].sort((a, b) => { 
-      if (a === 'Sem Categoria') return -1; 
-      if (b === 'Sem Categoria') return 1; 
-      return a.localeCompare(b); 
-    }); 
+    return [...categories].sort((a, b) => { if (a === 'Sem Categoria') return -1; if (b === 'Sem Categoria') return 1; return a.localeCompare(b); }); 
   }, [categories]);
 
   const updatePrice = useCallback((cost: number, markup: number) => {
@@ -2493,12 +2589,17 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
   };
   const filteredProducts = useMemo(() => {
     const t = search.toLowerCase();
+    const s = filterSize.toLowerCase();
+    const c = filterColor.toLowerCase();
     return products.filter((p: Product) => {
       const matchSearch = p.active && (p.name.toLowerCase().includes(t) || p.sku.toLowerCase().includes(t));
       const matchCategory = filterCategory === 'Todas' ? true : p.category === filterCategory;
-      return matchSearch && matchCategory;
+      const matchSize = s ? p.size?.toLowerCase().includes(s) : true;
+      const matchColor = c ? p.color?.toLowerCase().includes(c) : true;
+      return matchSearch && matchCategory && matchSize && matchColor;
     });
-  }, [products, search, filterCategory]);
+  }, [products, search, filterCategory, filterSize, filterColor]);
+
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0">
       {!modal && (
@@ -2510,16 +2611,47 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
             <button type="button" onClick={() => { setForm({stock: 0, cost: 0, price: 0, markup: 2.0, size: '', color: '', sku: '', category: 'Sem Categoria', discountBlocked: false}); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase"><Plus size={16}/> Novo Cadastro</button>
         </div>
       )}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0">
-        <div className="relative group flex-1">
-          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" placeholder="SKU or name..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
-        <select className="bg-slate-50 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase outline-none" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-               <option value="Todas">Categorias</option>
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 shrink-0">
+        <div className="flex gap-4">
+          <div className="relative group flex-[3]">
+            <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="text" placeholder="SKU ou nome..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+          <select className="flex-1 bg-slate-50 px-4 py-2.5 rounded-xl border text-[10px] font-black uppercase outline-none focus:border-indigo-500" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+               <option value="Todas">Todas Categorias</option>
                {sortedCategories.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
-        </select>
+          </select>
+        </div>
+
+        <div className="flex gap-6 items-center border-t pt-4">
+          <div className="flex items-center gap-3">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TAM</label>
+            <input 
+              type="text" 
+              placeholder="Ex: P, M, 42..." 
+              className="w-32 px-3 py-2 bg-slate-50 border rounded-lg text-xs font-bold outline-none focus:border-indigo-500 uppercase"
+              value={filterSize}
+              onChange={e => setFilterSize(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">COR</label>
+            <input 
+              type="text" 
+              placeholder="Ex: Branca, Azul..." 
+              className="w-48 px-3 py-2 bg-slate-50 border rounded-lg text-xs font-bold outline-none focus:border-indigo-500 uppercase"
+              value={filterColor}
+              onChange={e => setFilterColor(e.target.value)}
+            />
+          </div>
+          {(filterSize || filterColor) && (
+            <button onClick={() => { setFilterSize(''); setFilterColor(''); }} className="text-[9px] font-black text-red-400 uppercase hover:text-red-600 transition-colors flex items-center gap-1">
+              <X size={12} /> Limpar Filtros
+            </button>
+          )}
+        </div>
       </div>
+
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0">
         <div className="overflow-auto flex-1 custom-scroll">
           <table className="w-full text-left border-separate border-spacing-0">
@@ -2721,12 +2853,13 @@ const DashboardViewComponent = ({ products, sales, cashSession, fiados, cashHist
     return { sellers: Object.entries(sellersMap).sort((a, b) => b[1] - a[1]), total: totalMonthly };
   }, [sales, commFilterMonth]);
 
-  const totalReceivedForBadges = stats.totals.cash + stats.totals.pix + stats.totals.card + stats.totals.voucher + stats.totals.voucherVip;
   const totalStock = products.reduce((acc: number, p: any) => acc + p.stock, 0);
   const totalStockCost = products.reduce((acc: number, p: any) => acc + (p.cost * p.stock), 0);
   const totalStockSaleValue = products.reduce((acc: number, p: any) => acc + (p.price * p.stock), 0);
   const totalFiadoPending = fiados.filter((f: FiadoRecord) => f.status === 'pending').reduce((acc: number, f: FiadoRecord) => acc + f.remainingAmount, 0);
   
+  const totalReceivedForBadges = stats.totals.cash + stats.totals.pix + stats.totals.card + stats.totals.voucher + stats.totals.voucherVip;
+
   return (
     <div className="space-y-8 animate-in fade-in h-full flex flex-col pb-10">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -2858,11 +2991,17 @@ const PaymentBadge = ({ label, val, color, total, icon }: any) => {
 
 // --- RELATÓRIOS ---
 
-const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, setMovements, cashHistory, cashSession, settings, setExchangeCredit, setCurrentView }: any) => {
+const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, setMovements, cashHistory, cashSession, setCashSession, settings, setExchangeCredit, setCurrentView, vendedores }: any) => {
   const [tab, setTab] = useState<'sales' | 'cash' | 'fluxo'>('sales'); const [search, setSearch] = useState(''); const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const [reprintSale, setReprintSale] = useState<Sale | null>(null); 
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editSeller, setEditSeller] = useState('');
+  const [editPaymentMethod, setEditPaymentMethod] = useState('');
+
   const [period, setPeriod] = useState<'day' | 'month' | 'year'>('day'); const [selectedDay, setSelectedDay] = useState(new Date().toISOString().slice(0, 10)); const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
-  const isAdmin = user.role === 'admin' || user.id === 0; const canDelete = isAdmin || (settings.sellerPermissions || []).includes('delete_sale'); const canExchange = isAdmin || (settings.sellerPermissions || []).includes('exchange_sale');
+  const isAdmin = user.role === 'admin' || user.id === 0; 
+  const isMasterUser = user.id === 0 || user.email === 'master@internal';
+  const canDelete = isAdmin || (settings.sellerPermissions || []).includes('delete_sale'); const canExchange = isAdmin || (settings.sellerPermissions || []).includes('exchange_sale');
   const hasSubPermission = (permId: string) => isAdmin || (settings.sellerPermissions || []).includes(permId);
   const showSalesTab = true; const showFluxoTab = hasSubPermission('reports_fluxo'); const showCashTab = hasSubPermission('reports_cash');
   useEffect(() => { if (!showSalesTab) { if (showFluxoTab) setTab('fluxo'); else if (showCashTab) setTab('cash'); } }, [showSalesTab, showFluxoTab, showCashTab]);
@@ -2909,6 +3048,54 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
     setSales((prev: Sale[]) => prev.map(s => { if (s.id === sale.id) { return { ...s, items: s.items.map(it => it.cartId === item.cartId ? { ...it, isExchanged: true } : it) }; } return s; }));
     setExchangeCredit((prev: number) => prev + netItemValue); setSelectedSale(null); setCurrentView('sales'); alert(`Sucesso! R$ ${formatCurrency(netItemValue)} de crédito adicionado ao sistema.`);
   };
+
+  const handleUpdateSaleMaster = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSale) return;
+    
+    // --- LÓGICA DE AJUSTE DE CAIXA (SANGREIA/ENTRADA AUTOMÁTICA) ---
+    const oldCashContribution = editingSale.payments
+        .filter(p => p.method === 'Dinheiro')
+        .reduce((acc, p) => acc + p.amount, 0) - (editingSale.change || 0);
+
+    const totalSalePayments = editingSale.payments.reduce((acc, p) => acc + p.amount, 0);
+    const newCashContribution = (editPaymentMethod === 'Dinheiro' ? totalSalePayments : 0) - (editPaymentMethod === 'Dinheiro' ? (editingSale.change || 0) : 0);
+
+    const cashDifference = newCashContribution - oldCashContribution;
+
+    if (cashDifference !== 0 && cashSession && setCashSession) {
+        const adjustmentLog: CashLog = {
+            id: Math.random().toString(36).substr(2, 9),
+            type: 'ajuste',
+            amount: Math.abs(cashDifference),
+            description: `Ajuste Master Venda #${editingSale.id.toString().slice(-4)} (${editingSale.payments[0]?.method} -> ${editPaymentMethod})`,
+            time: new Date().toISOString(),
+            user: user.name
+        };
+
+        setCashSession((prev: CashSession) => ({
+            ...prev,
+            currentBalance: prev.currentBalance + cashDifference,
+            logs: [adjustmentLog, ...prev.logs]
+        }));
+    }
+
+    const updatedSales = sales.map((s: Sale) => {
+      if (s.id === editingSale.id) {
+        return {
+          ...s,
+          user: editSeller,
+          payments: s.payments.map(p => ({ ...p, method: editPaymentMethod }))
+        };
+      }
+      return s;
+    });
+
+    setSales(updatedSales);
+    setEditingSale(null);
+    alert('Venda atualizada com sucesso pelo MASTER SYSTEM! O saldo do caixa foi ajustado.');
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0">
       <div className="flex flex-col gap-6 md:flex-row md:items-end justify-between shrink-0">
@@ -2929,14 +3116,58 @@ const ReportsViewComponent = ({ user, sales, setSales, products, setProducts, se
            {showFluxoTab && <button onClick={() => setTab('fluxo')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${tab === 'fluxo' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:bg-slate-50'}`}><RefreshCw size={14}/> Entradas/Sangrias</button>}
            {showCashTab && <button onClick={() => setTab('cash')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 ${tab === 'cash' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-400 hover:bg-slate-50'}`}><History size={14}/> Histórico de Caixa</button>}
       </div>
-      {tab === 'sales' && showSalesTab && (<><div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0"><div className="relative group flex-1"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Filtrar por ID, vendedor ou produto..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} /></div></div><div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data/Hora</th><th className="px-6 py-4">ID</th><th className="px-6 py-4">Vendedor</th><th className="px-6 py-4 text-right">Total</th><th className="px-6 py-4 text-center">Itens</th><th className="px-6 py-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredSales.map((s: Sale) => (<tr key={s.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(s.date).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(s.date).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-[10px] font-mono font-black text-indigo-600">#{s.id.toString().slice(-6)}</td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{s.user}</td><td className="px-6 py-4 text-right font-black text-slate-900 font-mono text-xs">R$ {formatCurrency(s.total)}</td><td className="px-6 py-4 text-center"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500">{s.items.length}</span></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setSelectedSale(s)} className="p-2 text-slate-400 hover:text-indigo-600" title="Ver Detalhes"><Eye size={16}/></button>{canDelete && <button onClick={() => handleDeleteSale(s)} className="p-2 text-slate-400 hover:text-red-600" title="Excluir"><Trash2 size={16}/></button>}</div></td></tr>))}{filteredSales.length === 0 && (<tr><td colSpan={6} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma venda encontrada para este período...</td></tr>)}</tbody></table></div></div></>)}
+      {tab === 'sales' && showSalesTab && (<><div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 shrink-0"><div className="relative group flex-1"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" placeholder="Filtrar por ID, vendedor ou produto..." className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500" value={search} onChange={(e) => setSearch(e.target.value)} /></div></div><div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data/Hora</th><th className="px-6 py-4">ID</th><th className="px-6 py-4">Vendedor</th><th className="px-6 py-4 text-right">Total</th><th className="px-6 py-4 text-center">Itens</th><th className="px-6 py-4 text-right">Ações</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredSales.map((s: Sale) => (<tr key={s.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(s.date).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(s.date).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-[10px] font-mono font-black text-indigo-600">#{s.id.toString().slice(-6)}</td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase">{s.user}</td><td className="px-6 py-4 text-right font-black text-slate-900 font-mono text-xs">R$ {formatCurrency(s.total)}</td><td className="px-6 py-4 text-center"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500">{s.items.length}</span></td><td className="px-6 py-4 text-right"><div className="flex justify-end gap-2"><button onClick={() => setSelectedSale(s)} className="p-2 text-slate-400 hover:text-indigo-600" title="Ver Detalhes"><Eye size={16}/></button>{isMasterUser && <button onClick={() => { setEditingSale(s); setEditSeller(s.user); setEditPaymentMethod(s.payments[0]?.method || 'Dinheiro'); }} className="p-2 text-slate-400 hover:text-amber-500" title="Editar Venda (MASTER)"><Edit size={16}/></button>}{canDelete && <button onClick={() => handleDeleteSale(s)} className="p-2 text-slate-400 hover:text-red-600" title="Excluir"><Trash2 size={16}/></button>}</div></td></tr>))}{filteredSales.length === 0 && (<tr><td colSpan={6} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma venda encontrada para este período...</td></tr>)}</tbody></table></div></div></>)}
       {tab === 'fluxo' && showFluxoTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Data e Hora</th><th className="px-6 py-4">Usuário</th><th className="px-6 py-4">Tipo</th><th className="px-6 py-4">Descrição/Motivo</th><th className="px-6 py-4 text-right">Valor</th></tr></thead><tbody className="divide-y divide-slate-100">{cashLogs.map((log) => (<tr key={log.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col"><span className="text-xs font-bold text-slate-800">{new Date(log.time).toLocaleDateString()}</span><span className="text-[9px] text-slate-400 font-mono">{new Date(log.time).toLocaleTimeString()}</span></div></td><td className="px-6 py-4 text-xs font-bold text-slate-600 uppercase italic tracking-tight">{log.user}</td><td className="px-6 py-4"><span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${log.type === 'entrada' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>{log.type === 'entrada' ? 'Entrada' : 'Sangria'}</span></td><td className="px-6 py-4 text-xs font-bold text-slate-500 max-w-xs truncate">{log.description || '-'}</td><td className={`px-6 py-4 text-right font-black font-mono text-xs ${log.type === 'entrada' ? 'text-green-600' : 'text-red-600'}`}>{log.type === 'entrada' ? '+' : '-'} R$ {formatCurrency(log.amount)}</td></tr>))}{cashLogs.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhuma movimentação de caixa encontrada...</td></tr>)}</tbody></table></div></div>)}
       {tab === 'cash' && showCashTab && (<div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200 flex-1 flex flex-col min-h-0 animate-in fade-in"><div className="overflow-auto flex-1 custom-scroll"><table className="w-full text-left border-separate border-spacing-0"><thead className="bg-slate-50 sticky top-0 z-10 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b"><tr><th className="px-6 py-4">Abertura / Fechamento</th><th className="px-6 py-4">Usuários</th><th className="px-6 py-4 text-right">Saldo Inicial</th><th className="px-6 py-4 text-right">Saldo Final</th><th className="px-6 py-4 text-center">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{filteredCashHistory.map((h: CashHistoryEntry) => (<tr key={h.id} className="hover:bg-slate-50 transition-all group"><td className="px-6 py-4"><div className="flex flex-col gap-1"><div className="flex items-center gap-2 text-[10px] font-bold text-green-600"><Clock size={10} /> {new Date(h.openedAt).toLocaleString()}</div><div className="flex items-center gap-2 text-[10px] font-bold text-red-500"><Clock size={10} /> {new Date(h.closedAt).toLocaleString()}</div></div></td><td className="px-6 py-4"><div className="flex flex-col gap-1"><span className="text-[10px] font-black uppercase text-slate-400">AB: {h.openedBy}</span><span className="text-[10px] font-black uppercase text-slate-400">FC: {h.closedBy}</span></div></td><td className="px-6 py-4 text-right text-xs font-mono font-bold text-slate-500">R$ {formatCurrency(h.openingBalance)}</td><td className="px-6 py-4 text-right text-xs font-mono font-black text-slate-900">R$ {formatCurrency(h.closingBalance)}</td><td className="px-6 py-4 text-center"><span className="px-3 py-1 bg-slate-100 rounded-full text-[9px] font-black text-slate-400 uppercase">Encerrado</span></td></tr>))}{filteredCashHistory.length === 0 && (<tr><td colSpan={5} className="py-20 text-center text-slate-300 font-bold italic">Nenhum histórico de caixa encontrado para este período...</td></tr>)}</tbody></table></div></div>)}
+      
+      {editingSale && (
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[120] animate-in fade-in">
+          <form onSubmit={handleUpdateSaleMaster} className="bg-white p-10 rounded-[2.5rem] w-full max-w-sm shadow-2xl space-y-6">
+            <div className="flex justify-between items-center border-b pb-4">
+               <h3 className="text-xl font-black text-slate-900 uppercase italic">Ajustar Venda (MASTER)</h3>
+               <button type="button" onClick={() => setEditingSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Vendedor</label>
+                <select 
+                  className="w-full border-2 rounded-xl px-4 py-3 text-sm font-black uppercase bg-slate-50 outline-none focus:border-indigo-500"
+                  value={editSeller}
+                  onChange={(e) => setEditSeller(e.target.value)}
+                  required
+                >
+                  {vendedores.map((v: User) => (<option key={v.id} value={v.name}>{v.name}</option>))}
+                  <option value="MASTER SYSTEM">MASTER SYSTEM</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase block mb-1">Forma de Pagamento</label>
+                <select 
+                  className="w-full border-2 rounded-xl px-4 py-3 text-sm font-black uppercase bg-slate-50 outline-none focus:border-indigo-500"
+                  value={editPaymentMethod}
+                  onChange={(e) => setEditPaymentMethod(e.target.value)}
+                  required
+                >
+                  <option>Dinheiro</option><option>Pix</option><option>C. Débito</option><option>C. Crédito</option><option>C. Parcelado</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button type="button" onClick={() => setEditingSale(null)} className="flex-1 py-4 text-slate-400 font-black uppercase text-[10px]">Cancelar</button>
+              <button type="submit" className="flex-[2] py-4 bg-amber-500 text-white font-black rounded-2xl uppercase text-[10px] shadow-xl hover:bg-amber-600">Salvar Alterações</button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {selectedSale && (<div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in"><div className="bg-white p-8 rounded-[2rem] w-full max-w-2xl shadow-2xl space-y-6 max-h-[90vh] overflow-auto custom-scroll"><div className="flex justify-between items-center border-b pb-4"><h3 className="text-xl font-black text-slate-900 uppercase italic">Detalhes da Venda #{selectedSale.id.toString().slice(-6)}</h3><div className="flex items-center gap-2"><button onClick={() => setReprintSale(selectedSale)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Reimprimir Cupom"><Printer size={20}/></button><button onClick={() => setSelectedSale(null)} className="text-slate-300 hover:text-slate-500"><X size={24}/></button></div></div><div className="grid grid-cols-2 gap-6 bg-slate-50 p-4 rounded-2xl border"><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Data / Hora</p><p className="text-xs font-bold text-slate-700">{new Date(selectedSale.date).toLocaleString()}</p></div><div><p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Vendedor</p><p className="text-xs font-black text-indigo-600 uppercase">{selectedSale.user}</p></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produtos Vendidos</h4><div className="border rounded-2xl overflow-hidden"><table className="w-full text-left text-xs"><thead className="bg-slate-50 font-black text-slate-500 uppercase text-[9px]"><tr><th className="px-4 py-2">Item</th><th className="px-4 py-2 text-center">Qtd</th><th className="px-4 py-2 text-right">Total</th><th className="px-4 py-2 text-center">Troca</th></tr></thead><tbody className="divide-y">{selectedSale.items.map((it, i) => (<tr key={i} className={`bg-white ${it.isExchanged ? 'opacity-50 grayscale' : ''}`}><td className="px-4 py-3"><div className="flex flex-col"><span className="font-bold">{it.name}</span><span className="text-[9px] text-slate-400 font-mono">{it.sku}</span><span className="text-[8px] text-slate-500 italic mt-0.5 uppercase tracking-tighter">tam: {it.size || '-'} / cor: {it.color || '-'}</span>{it.isExchanged && <span className="text-[7px] font-black text-red-500 uppercase mt-0.5 animate-pulse">Item Trocado</span>}</div></td><td className="px-4 py-3 text-center font-bold">{it.quantity}</td><td className="px-4 py-3 text-right font-mono font-bold text-indigo-600">R$ {formatCurrency((it.price * it.quantity) - it.discountValue - it.manualDiscountValue)}</td><td className="px-4 py-3 text-center">{canExchange && !it.isExchanged && (<button onClick={() => handleItemExchange(selectedSale, it)} className="p-1.5 bg-amber-50 text-amber-500 hover:bg-amber-500 hover:text-white rounded-lg transition-all shadow-sm" title="Trocar Item"><RotateCcw size={14}/></button>)}</td></tr>))}</tbody></table></div></div><div className="border-t pt-6 flex flex-col items-end gap-2"><div className="flex justify-between w-64 text-xs font-bold text-slate-400"><span>Subtotal</span><span className="font-mono">R$ {formatCurrency(selectedSale.subtotal)}</span></div><div className="flex justify-between w-64 text-xs font-bold text-red-400"><span>Desconto ({selectedSale.discountPercent.toFixed(1)}%)</span><span className="font-mono">- R$ {formatCurrency(selectedSale.discount)}</span></div>{selectedSale.exchangeCreditUsed && selectedSale.exchangeCreditUsed > 0 && (<div className="flex justify-between w-64 text-xs font-bold text-amber-500"><span>Crédito Utilizado</span><span className="font-mono">- R$ {formatCurrency(selectedSale.exchangeCreditUsed)}</span></div>)}<div className="flex justify-between w-64 text-xl font-black text-slate-900 border-t pt-2"><span className="italic uppercase tracking-tighter">Total Pago</span><span className="font-mono">R$ {formatCurrency(selectedSale.total)}</span></div></div><div className="space-y-3"><h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Meios de Pagamento</h4><div className="flex flex-wrap gap-2">{selectedSale.payments.map((p, i) => (<div key={i} className={`bg-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-50 border border-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-100 px-3 py-2 rounded-xl flex flex-col`}><span className={`text-[8px] font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-400 uppercase`}>{p.method} {p.installments ? `${p.installments}x` : ''} {p.voucherCode && p.method !== 'Voucher VIP' ? `(${p.voucherCode})` : ''}{p.method === 'F12' ? ` (${p.f12ClientName})` : ''}</span><span className={`text-xs font-black text-${(p.method === 'Voucher VIP' || p.method === 'F12') ? 'purple' : 'indigo'}-600 font-mono`}>R$ {formatCurrency(p.amount)}</span></div>))}</div></div></div></div>)}
 
       {reprintSale && (
         <div className="fixed inset-0 flex items-center justify-center p-6 z-[150] animate-in fade-in no-print-overlay">
-          <div className="bg-white p-8 rounded-[2rem] w-full max-w-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
+          <div className="bg-white p-8 rounded-[2rem] w-full max-md shadow-2xl space-y-6 animate-in zoom-in-95 overflow-hidden">
              <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full mx-auto flex items-center justify-center border border-indigo-100">
                     <Printer size={32} strokeWidth={3} />
@@ -3211,67 +3442,42 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
                       <button 
                         type="button" 
                         onClick={handleToggleShowPass}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 transition-colors"
-                      >
-                        <Eye size={18} className={showPass ? "text-indigo-600" : ""} />
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600">
+                        {showPass ? <Eye size={18} /> : <Lock size={18} />}
                       </button>
                    </div>
                 </div>
-              ) : (
-                <div className="pt-2">
-                   {!changingPass ? (
-                      <button 
-                        type="button"
-                        onClick={() => setChangingPass(true)}
-                        className="w-full py-4 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-500 font-black text-[9px] uppercase hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"
-                      >
-                         <Lock size={12} /> Mudar Senha do Usuário
-                      </button>
-                   ) : (
-                      <div className="space-y-3 animate-in fade-in zoom-in-95 bg-indigo-50/30 p-3 rounded-2xl border border-indigo-100">
-                         <div className="space-y-1">
-                            <label className="text-[8px] font-black text-indigo-400 uppercase ml-1">Sua Senha Atual (Confirmar)</label>
-                            <input 
-                              type="password" 
-                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm bg-white font-bold outline-none focus:border-indigo-400" 
-                              placeholder="••••••"
-                              value={currentPassInput}
-                              onChange={e => setCurrentPassInput(e.target.value)}
-                            />
-                         </div>
-                         <div className="space-y-1">
-                            <label className="text-[8px] font-black text-indigo-400 uppercase ml-1">Nova Senha do Colaborador</label>
-                            <input 
-                              type="password" 
-                              className="w-full border-2 rounded-xl px-4 py-2.5 text-sm bg-white font-bold outline-none focus:border-indigo-400" 
-                              placeholder="Nova senha"
-                              value={newPassInput}
-                              onChange={e => setNewPassInput(e.target.value)}
-                            />
-                         </div>
-                         <button 
-                            type="button"
-                            onClick={() => { setChangingPass(false); setCurrentPassInput(''); setNewPassInput(''); }}
-                            className="text-[8px] font-black text-slate-400 uppercase ml-2 hover:text-red-500"
-                          >
-                            Cancelar Mudança
-                          </button>
-                      </div>
-                   )}
+              ) : currentUser.id === editModal.id && (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" checked={changingPass} onChange={e => setChangingPass(e.target.checked)} className="w-4 h-4 rounded text-indigo-600" />
+                    <span className="text-[10px] font-black uppercase text-slate-500">Alterar minha senha</span>
+                  </label>
+                  {changingPass && (
+                    <div className="space-y-3 animate-in slide-in-from-top-2">
+                       <input type="password" placeholder="Senha Atual" className="w-full border-2 rounded-xl px-4 py-2 text-xs font-bold" value={currentPassInput} onChange={e => setCurrentPassInput(e.target.value)} />
+                       <input type="password" placeholder="Nova Senha" className="w-full border-2 rounded-xl px-4 py-2 text-xs font-bold" value={newPassInput} onChange={e => setNewPassInput(e.target.value)} />
+                    </div>
+                  )}
                 </div>
               )}
 
               <div className="space-y-1">
-                <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Nível de Acesso</label>
-                <select className="w-full border-2 rounded-xl px-4 py-3 text-sm font-bold bg-slate-50/50" value={editModal.role} onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}>
-                  <option value="atendente">Atendente (Vendedor)</option>
-                  <option value="admin">Administrador (Gerente)</option>
-                </select>
+                 <label className="text-[8px] font-black text-slate-400 uppercase ml-1">Nível de Acesso</label>
+                 <select 
+                   disabled={editModal.id === 0 || !isMaster} 
+                   className="w-full border-2 rounded-xl px-4 py-3 text-sm font-bold bg-slate-50/50 appearance-none disabled:opacity-50"
+                   value={editModal.role}
+                   onChange={e => setEditModal({...editModal, role: e.target.value as UserRole})}
+                 >
+                    <option value="atendente">Vendedor (Atendente)</option>
+                    <option value="admin">Administrador</option>
+                 </select>
               </div>
             </div>
-            <div className="flex justify-end gap-3 pt-6">
-              <button type="button" onClick={() => { setEditModal(null); setShowPass(false); setChangingPass(false); }} className="text-slate-400 font-black uppercase text-[10px] px-4">Cancelar</button>
-              <button type="submit" className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black uppercase text-[10px] shadow-xl hover:bg-indigo-700 active:scale-95 transition-all">Salvar Perfil</button>
+            <div className="flex gap-2 pt-4">
+              <button type="button" onClick={() => setEditModal(null)} className="flex-1 py-3 text-slate-400 font-black uppercase text-[10px]">Cancelar</button>
+              <button type="submit" className="flex-1 py-3 bg-indigo-600 text-white font-black uppercase text-[10px] rounded-xl shadow-lg shadow-indigo-100">Atualizar</button>
             </div>
           </form>
         </div>
@@ -3280,6 +3486,7 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
   );
 };
 
-// --- BOOTSTRAP ---
-const root = createRoot(document.getElementById('root')!);
-root.render(<App />);
+const rootElement = document.getElementById('root');
+if (rootElement) {
+  createRoot(rootElement).render(<App />);
+}
