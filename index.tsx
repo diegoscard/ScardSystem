@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
@@ -10,7 +11,7 @@ import {
   History, Clock, UserCheck, RotateCcw, Award, Zap, Calculator, Trophy, Star, Medal,
   ChevronLeft, ChevronRight, ListOrdered, Download, Upload, Save, FileWarning,
   Megaphone, CalendarDays, CheckCircle2, TicketPercent, Gift, ShieldCheck as ShieldIcon,
-  Printer, Check, Key, Shield, Monitor, UserPlus, HandCoins
+  Printer, Check, Key, Shield, Monitor, UserPlus, HandCoins, Share2, FileText
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO DE SEGURANÇA (CHAVES DE ACESSO) ---
@@ -2550,6 +2551,8 @@ const SalesViewComponent = ({ user, products, setProducts, setSales, setMovement
 
 const StockManagementView = ({ products, setProducts, categories }: any) => {
   const [modal, setModal] = useState(false);
+  const [summaryModal, setSummaryModal] = useState(false);
+  const [summaryText, setSummaryText] = useState('');
   const [form, setForm] = useState<any>({ cost: 0, price: 0, markup: 2.0, category: 'Sem Categoria', stock: 0, size: '', color: '', discountBlocked: false });
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('Todas');
@@ -2600,6 +2603,39 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
     });
   }, [products, search, filterCategory, filterSize, filterColor]);
 
+  const generateWppSummary = () => {
+    if (filteredProducts.length === 0) {
+      alert('Nenhum produto visível para gerar resumo!');
+      return;
+    }
+    const now = new Date().toLocaleDateString();
+    let text = `📦 *RESUMO DE ESTOQUE - ${now}*\n`;
+    text += `--------------------------------\n`;
+    filteredProducts.forEach((p: Product) => {
+      text += `*${p.name}* | Tam: ${p.size || '-'} | Qtd: ${p.stock} un\n`;
+    });
+    text += `--------------------------------\n`;
+    text += `*Total de itens:* ${filteredProducts.reduce((acc: number, p: Product) => acc + p.stock, 0)} unidades.`;
+    
+    setSummaryText(text);
+    setSummaryModal(true);
+  };
+
+  const exportAsTxt = () => {
+    const blob = new Blob([summaryText], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `resumo_estoque_${new Date().toISOString().slice(0, 10)}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(summaryText);
+    alert('Resumo copiado para a área de transferência!');
+  };
+
   return (
     <div className="space-y-6 h-full flex flex-col min-h-0">
       {!modal && (
@@ -2608,7 +2644,14 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
             <h2 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Estoque</h2>
             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Controle de mercadorias</p>
             </div>
-            <button type="button" onClick={() => { setForm({stock: 0, cost: 0, price: 0, markup: 2.0, size: '', color: '', sku: '', category: 'Sem Categoria', discountBlocked: false}); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase"><Plus size={16}/> Novo Cadastro</button>
+            <div className="flex gap-2">
+                <button type="button" onClick={generateWppSummary} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
+                  <Share2 size={16}/> Resumo WhatsApp
+                </button>
+                <button type="button" onClick={() => { setForm({stock: 0, cost: 0, price: 0, markup: 2.0, size: '', color: '', sku: '', category: 'Sem Categoria', discountBlocked: false}); setModal(true); }} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-black flex items-center gap-2 shadow-lg active:scale-95 text-[10px] uppercase">
+                  <Plus size={16}/> Novo Cadastro
+                </button>
+            </div>
         </div>
       )}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 shrink-0">
@@ -2738,6 +2781,37 @@ const StockManagementView = ({ products, setProducts, categories }: any) => {
             </div>
             <div className="flex justify-end gap-3 pt-6 border-t mt-4"><button type="button" onClick={() => setModal(false)} className="px-5 py-2 text-slate-400 font-black uppercase text-[10px] tracking-widest">DESCARTAR</button><button type="submit" className="bg-indigo-600 text-white px-10 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl hover:bg-indigo-700 active:scale-95">SALVAR ALTERAÇÕES</button></div>
           </form>
+        </div>
+      )}
+
+      {summaryModal && (
+        <div className="fixed inset-0 flex items-center justify-center p-6 z-[100] animate-in fade-in bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-[2.5rem] w-full max-w-xl shadow-2xl space-y-6 flex flex-col relative">
+            <div className="flex justify-between items-center border-b pb-4 shrink-0">
+               <h3 className="text-xl font-black text-slate-900 uppercase italic flex items-center gap-2">
+                 <Share2 size={24} className="text-emerald-600" /> Resumo WhatsApp
+               </h3>
+               <button type="button" onClick={() => setSummaryModal(false)} className="text-slate-300 hover:text-slate-500 transition-colors"><X size={24}/></button>
+            </div>
+            
+            <div className="flex-1 overflow-hidden flex flex-col gap-4">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conteúdo do Resumo (Filtrado)</p>
+              <textarea 
+                readOnly
+                className="w-full flex-1 border-2 rounded-2xl p-6 text-sm font-mono bg-slate-50 focus:outline-none custom-scroll resize-none leading-relaxed"
+                value={summaryText}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t shrink-0">
+              <button type="button" onClick={exportAsTxt} className="flex-1 py-4 border-2 border-slate-100 text-slate-400 font-black uppercase text-[10px] rounded-xl flex items-center justify-center gap-2 hover:bg-slate-50 transition-all">
+                <FileText size={16} /> Baixar .TXT
+              </button>
+              <button type="button" onClick={copyToClipboard} className="flex-[2] py-4 bg-emerald-600 text-white font-black uppercase text-[10px] rounded-xl flex items-center justify-center gap-2 shadow-xl hover:bg-emerald-700 transition-all active:scale-95">
+                <Copy size={16} /> Copiar para WhatsApp
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -3383,7 +3457,7 @@ const TeamViewComponent = ({ currentUser, users, setUsers }: any) => {
     setChangingPass(false);
     setCurrentPassInput('');
     setNewPassInput('');
-    alert('Perfil atualizado com sucesso!'); 
+    alert('Perfil updated com sucesso!'); 
   };
 
   return (
