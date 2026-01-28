@@ -17,6 +17,7 @@ import {
 // --- CONFIGURAÇÃO DE SEGURANÇA (CHAVES DE ACESSO) ---
 const VALID_ACCESS_KEYS = [
   'VLYOG-1YMEL-8NNBZ-6NJ08-6WMFH', //-- RD STREET
+  '6KT23-4125K-4QKJ6-VAEYU-UEEEF', //-- RD STREET CASA
   'Master',
 ];
 
@@ -471,6 +472,20 @@ const App = () => {
 
   const handleOpenCash = (amount: number) => {
     if (!user) return;
+
+    // --- REGRAS DE SEGURANÇA PARA ABERTURA DE CAIXA ---
+    // O caixa só permite abertura se o valor informado bater com o saldo do último fechamento (se houver histórico).
+    if (cashHistory.length > 0) {
+      const lastSession = cashHistory[0]; // O histórico é mantido com o mais recente no índice 0.
+      const previousClosingBalance = lastSession.closingBalance;
+      
+      // Validação do saldo com margem de 0.01 centavo para evitar conflitos de precisão float
+      if (Math.abs(amount - previousClosingBalance) > 0.01) {
+        alert(`BLOQUEIO DE ABERTURA: O saldo inicial informado (R$ ${formatCurrency(amount)}) NÃO confere com o saldo de fechamento da sessão anterior (R$ ${formatCurrency(previousClosingBalance)}). Por favor, verifique o saldo físico e informe o valor correto.`);
+        return;
+      }
+    }
+
     const newSession: CashSession = {
       isOpen: true,
       openingBalance: amount,
